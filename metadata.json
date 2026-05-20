@@ -1,0 +1,5 @@
+{
+  "name": "PhotoBill Automation",
+  "description": "A modern client portal for Tally accounting automation, featuring entry management, admin controls, and real-time status tracking.",
+  "requestFramePermissions": []
+}
