@@ -180,7 +180,7 @@ const Entries: React.FC = () => {
                       {formatCurrency(e.totalAmount || 0)}
                     </td>
                     <td className="px-8 py-5 text-right">
-                      <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <button 
                           onClick={() => setPrintData({ ...e, companyName: user?.companyName })}
                           className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs uppercase tracking-widest rounded-lg flex items-center gap-2 inline-flex transition-colors cursor-pointer"

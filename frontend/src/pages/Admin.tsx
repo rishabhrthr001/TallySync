@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, 
@@ -21,7 +21,10 @@ import {
   Edit,
   CheckCircle,
   Info,
-  LogOut
+  LogOut,
+  ArrowLeft,
+  TrendingUp,
+  BarChart3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -56,10 +59,14 @@ interface Entry {
 export default function Admin() {
   const { user: currentUser, logout } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+
   const [users, setUsers] = useState<User[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'entries' | 'clients'>('entries');
+  const [activeTab, setActiveTab] = useState<'entries' | 'clients' | 'reports'>('entries');
+  const [selectedCompanyForReport, setSelectedCompanyForReport] = useState<User | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -90,9 +97,25 @@ export default function Admin() {
     navigate('/login');
   };
 
+  const handleTabChange = (tab: 'entries' | 'clients' | 'reports') => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
+    setSelectedCompanyForReport(null); // Clear active report when switching tabs
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (tabParam === 'reports') {
+      setActiveTab('reports');
+    } else if (tabParam === 'clients') {
+      setActiveTab('clients');
+    } else if (tabParam === 'entries') {
+      setActiveTab('entries');
+    }
+  }, [tabParam]);
 
   const fetchData = async () => {
     try {
@@ -206,36 +229,51 @@ export default function Admin() {
           </div>
           <p className="text-slate-500 font-medium text-lg leading-relaxed">Oversee multi-tenant synchronization and firm accounts</p>
         </div>
-        <div className="flex flex-col md:flex-row items-center gap-4">
+        <div className="flex flex-col sm:flex-row md:flex-row items-center gap-4 w-full md:w-auto">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-50 text-indigo-600 font-black uppercase tracking-widest text-[10px] rounded-xl border border-indigo-100 hover:bg-indigo-100 transition-all shadow-sm active:scale-95 w-full sm:w-auto"
+          >
+            <Building2 className="w-4 h-4" />
+            Go to Main Dashboard
+          </button>
           <button
             onClick={handleExit}
-            className="flex items-center gap-2 px-6 py-3 bg-rose-50 text-rose-600 font-black uppercase tracking-widest text-[10px] rounded-xl border border-rose-100 hover:bg-rose-100 transition-all shadow-sm active:scale-95"
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-rose-50 text-rose-600 font-black uppercase tracking-widest text-[10px] rounded-xl border border-rose-100 hover:bg-rose-100 transition-all shadow-sm active:scale-95 w-full sm:w-auto"
           >
             <LogOut className="w-4 h-4" />
-            Exit Firm Network
+            Logout
           </button>
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+          <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto max-w-full whitespace-nowrap w-full sm:w-auto">
             <button
-              onClick={() => setActiveTab('entries')}
-              className={`px-8 py-3 rounded-xl text-sm font-black uppercase tracking-widest transition-all ${
+              onClick={() => handleTabChange('entries')}
+              className={`flex-shrink-0 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
                 activeTab === 'entries' ? 'bg-white text-indigo-600 shadow-xl shadow-indigo-100' : 'text-slate-500 hover:text-slate-800'
               }`}
             >
               Entry Stream
             </button>
             <button
-              onClick={() => setActiveTab('clients')}
-              className={`px-8 py-3 rounded-xl text-sm font-black uppercase tracking-widest transition-all ${
+              onClick={() => handleTabChange('clients')}
+              className={`flex-shrink-0 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
                 activeTab === 'clients' ? 'bg-white text-indigo-600 shadow-xl shadow-indigo-100' : 'text-slate-500 hover:text-slate-800'
               }`}
             >
               Firm Network
             </button>
+            <button
+              onClick={() => handleTabChange('reports')}
+              className={`flex-shrink-0 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                activeTab === 'reports' ? 'bg-white text-indigo-600 shadow-xl shadow-indigo-100' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Company Reports
+            </button>
           </div>
         </div>
       </div>
 
-      {activeTab === 'entries' ? (
+      {activeTab === 'entries' && (
         <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-2xl shadow-slate-200/50">
           <div className="p-8 border-b border-slate-100 flex items-center justify-between">
             <h2 className="font-black text-slate-900 text-xl flex items-center gap-3">
@@ -323,7 +361,9 @@ export default function Admin() {
             </table>
           </div>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'clients' && (
         <div className="space-y-8">
           <div className="flex items-center justify-between">
             <div className="relative flex-1 max-w-xl">
@@ -376,6 +416,17 @@ export default function Admin() {
                   <span className="text-[10px] font-black uppercase text-slate-300 italic">Member since {format(new Date(client.createdAt || Date.now()), 'MMM yyyy')}</span>
                   <div className="flex gap-2">
                     <button 
+                      onClick={() => {
+                        setSelectedCompanyForReport(client);
+                        setActiveTab('reports');
+                        setSearchParams({ tab: 'reports' });
+                      }}
+                      className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                      title="View Report"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                    </button>
+                    <button 
                       onClick={() => setEditingClient(client)}
                       className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
                       title="Edit Firm"
@@ -395,6 +446,218 @@ export default function Admin() {
             ))}
           </div>
         </div>
+      )}
+
+      {activeTab === 'reports' && (
+        selectedCompanyForReport ? (
+          <div className="bg-white rounded-[2.5rem] border border-slate-200 p-10 shadow-2xl shadow-slate-200/50 space-y-8">
+            <button
+              onClick={() => setSelectedCompanyForReport(null)}
+              className="flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-800 mb-4 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" /> Back to Company List
+            </button>
+            
+            <div className="border-b border-slate-100 pb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <h2 className="text-3xl font-black text-slate-900 leading-tight">
+                  {selectedCompanyForReport.companyName || 'Unmapped Firm'}
+                </h2>
+                <p className="text-slate-500 font-medium text-sm mt-1">
+                  Firm report & activity overview for Tally synchronizations.
+                </p>
+              </div>
+              <div className="px-5 py-3 bg-indigo-50 border border-indigo-100 rounded-2xl flex flex-col justify-center">
+                <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Sync Success Rate</span>
+                <span className="text-2xl font-black text-indigo-700 mt-1">
+                  {(() => {
+                    const compEntries = entries.filter(e => e.companyName === selectedCompanyForReport.companyName);
+                    const success = compEntries.filter(e => e.status === 'success').length;
+                    const total = compEntries.length;
+                    return total > 0 ? Math.round((success / total) * 100) : 100;
+                  })()}%
+                </span>
+              </div>
+            </div>
+
+            {/* Firm info & Stats */}
+            {(() => {
+              const compEntries = entries.filter(e => e.companyName === selectedCompanyForReport.companyName);
+              const successCount = compEntries.filter(e => e.status === 'success').length;
+              const pendingCount = compEntries.filter(e => e.status === 'pending').length;
+              const failedCount = compEntries.filter(e => e.status === 'failed').length;
+              
+              const totalSales = compEntries
+                .filter(e => e.type === 'sales' && e.status === 'success')
+                .reduce((sum, e) => sum + (e.totalAmount || 0), 0);
+              
+              const totalPurchases = compEntries
+                .filter(e => e.type === 'purchase' && e.status === 'success')
+                .reduce((sum, e) => sum + (e.totalAmount || 0), 0);
+
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Vouchers</div>
+                      <div className="text-3xl font-black text-slate-800 mt-2">{compEntries.length}</div>
+                      <div className="text-[10px] text-slate-400 mt-1 font-bold">All-time uploaded</div>
+                    </div>
+                    <div className="bg-emerald-50/50 p-6 rounded-3xl border border-emerald-100/50">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Total Sales Value</div>
+                      <div className="text-3xl font-black text-emerald-700 mt-2">{formatCurrency(totalSales)}</div>
+                      <div className="text-[10px] text-emerald-600 mt-1 font-bold">Successful syncs</div>
+                    </div>
+                    <div className="bg-amber-50/50 p-6 rounded-3xl border border-amber-100/50">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-amber-600">Total Purchase Value</div>
+                      <div className="text-3xl font-black text-amber-700 mt-2">{formatCurrency(totalPurchases)}</div>
+                      <div className="text-[10px] text-amber-600 mt-1 font-bold">Successful syncs</div>
+                    </div>
+                    <div className="bg-rose-50/50 p-6 rounded-3xl border border-rose-100/50">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-rose-600">Failed / Pending</div>
+                      <div className="text-3xl font-black text-rose-700 mt-2">
+                        {failedCount} <span className="text-slate-400 text-sm font-bold">/</span> {pendingCount}
+                      </div>
+                      <div className="text-[10px] text-rose-600 mt-1 font-bold">Requires attention</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+                    <div>
+                      <div className="text-xs text-slate-400 font-bold uppercase">Owner / Representative</div>
+                      <div className="text-base font-black text-slate-700 mt-1">{selectedCompanyForReport.name}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-400 font-bold uppercase">Official Email</div>
+                      <div className="text-base font-black text-slate-700 mt-1">{selectedCompanyForReport.email}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-400 font-bold uppercase">GSTIN / Tax ID</div>
+                      <div className="text-base font-black text-slate-700 mt-1">{selectedCompanyForReport.gstin || 'N/A'}</div>
+                    </div>
+                  </div>
+
+                  {/* Table of company entries */}
+                  <div className="border border-slate-100 rounded-3xl overflow-hidden bg-white shadow-sm">
+                    <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+                      <h4 className="font-black text-slate-900">Recent Sync History</h4>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-widest border-b border-slate-100">
+                            <th className="px-6 py-4">Timeline</th>
+                            <th className="px-6 py-4">Voucher No</th>
+                            <th className="px-6 py-4">Party</th>
+                            <th className="px-6 py-4">Type</th>
+                            <th className="px-6 py-4 text-right">Amount</th>
+                            <th className="px-6 py-4 text-center">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50 font-semibold text-slate-700">
+                          {compEntries.slice(0, 15).map(e => (
+                            <tr key={e._id} className="hover:bg-slate-50/30 transition-all">
+                              <td className="px-6 py-4 text-xs text-slate-400">{format(new Date(e.createdAt), 'MMM d, HH:mm')}</td>
+                              <td className="px-6 py-4 font-mono font-bold text-slate-900">{e.invoiceNumber || 'N/A'}</td>
+                              <td className="px-6 py-4">{e.partyName}</td>
+                              <td className="px-6 py-4">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${e.type === 'sales' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                                  {e.type}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right font-bold text-slate-900">{formatCurrency(e.totalAmount)}</td>
+                              <td className="px-6 py-4 text-center">
+                                <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
+                                  e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
+                                  e.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 
+                                  'bg-rose-50 text-rose-700 border border-rose-100'
+                                } border`}>
+                                  {e.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                          {compEntries.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="text-center py-12 text-slate-400 font-bold">No entries found for this firm.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        ) : (
+          <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-2xl shadow-slate-200/50">
+            <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+              <h2 className="font-black text-slate-900 text-xl flex items-center gap-3">
+                <BarChart3 className="w-6 h-6 text-indigo-600" />
+                Company-Wise Report Overview
+              </h2>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] border-b border-slate-100">
+                    <th className="px-10 py-6">Company / Firm Name</th>
+                    <th className="px-10 py-6 text-center">Total Vouchers</th>
+                    <th className="px-10 py-6 text-center">Success Vouchers</th>
+                    <th className="px-10 py-6 text-center">Failed Vouchers</th>
+                    <th className="px-10 py-6 text-center">Success Rate</th>
+                    <th className="px-10 py-6 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {users.filter(u => u.role === 'client').map(client => {
+                    const compEntries = entries.filter(e => e.companyName === client.companyName);
+                    const success = compEntries.filter(e => e.status === 'success').length;
+                    const failed = compEntries.filter(e => e.status === 'failed').length;
+                    const total = compEntries.length;
+                    const successRate = total > 0 ? Math.round((success / total) * 100) : 100;
+                    
+                    return (
+                      <tr key={client._id} className="hover:bg-indigo-50/30 transition-all group">
+                        <td className="px-10 py-8">
+                          <div className="text-base font-black text-slate-900 leading-tight">{client.companyName || 'Unmapped Firm'}</div>
+                          <div className="text-[10px] text-slate-400 font-bold uppercase mt-1">Owner: {client.name}</div>
+                        </td>
+                        <td className="px-10 py-8 text-center font-bold text-slate-700">{total}</td>
+                        <td className="px-10 py-8 text-center font-bold text-emerald-600">{success}</td>
+                        <td className="px-10 py-8 text-center font-bold text-rose-500">{failed}</td>
+                        <td className="px-10 py-8 text-center">
+                          <span className={`px-3 py-1 rounded-full text-xs font-black uppercase ${
+                            successRate >= 90 ? 'bg-emerald-50 text-emerald-700' :
+                            successRate >= 50 ? 'bg-amber-50 text-amber-700' :
+                            'bg-rose-50 text-rose-700'
+                          }`}>
+                            {successRate}%
+                          </span>
+                        </td>
+                        <td className="px-10 py-8 text-right">
+                          <button
+                            onClick={() => setSelectedCompanyForReport(client)}
+                            className="px-4 py-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all"
+                          >
+                            View Report
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {users.filter(u => u.role === 'client').length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="text-center py-16 text-slate-400 font-bold">No firms registered on this network.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
       )}
 
       {/* Toast Notification */}

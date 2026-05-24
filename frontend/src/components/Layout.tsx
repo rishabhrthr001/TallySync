@@ -25,8 +25,12 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
     { name: 'Create Entry', icon: FileText, path: '/create-entry' },
-    { name: 'Reports', icon: TrendingUp, path: '/reports' },
-    { name: 'Inventory', icon: Package, path: '/inventory' },
+    { 
+      name: 'Reports', 
+      icon: TrendingUp, 
+      path: user?.role === 'admin' ? '/admin?tab=reports' : '/reports' 
+    },
+    ...(user?.role !== 'admin' ? [{ name: 'Inventory', icon: Package, path: '/inventory' }] : []),
     { name: 'Ledgers', icon: Users, path: '/ledgers' },
     { name: 'Recent Entries', icon: History, path: '/entries' },
   ];
@@ -46,14 +50,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 sticky top-0 h-screen">
         <div className="p-6 flex items-center space-x-3">
           <img src="/favicon.svg" alt="Logo" className="w-10 h-10" />
-          <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-indigo-400 bg-clip-text text-transparent">
-              PhotoBill
-            </h1>
-            <p className="text-xs text-slate-400 mt-1 uppercase tracking-widest font-semibold">
-              {user?.companyName || 'Accounting OS'}
-            </p>
-          </div>
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-indigo-400 bg-clip-text text-transparent">
+            PhotoBill
+          </h1>
         </div>
 
         <nav className="flex-1 px-4 space-y-1">

@@ -4,8 +4,15 @@ import { Package, Search, Plus, RefreshCcw, BarChart3, Layers, ShoppingBag, Filt
 import Layout from '../components/Layout';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../utils/format';
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 const Inventory: React.FC = () => {
+  const { user } = useAuth();
+  
+  if (user?.role === 'admin') {
+    return <Navigate to="/admin" replace />;
+  }
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [newItem, setNewItem] = useState({ name: '', category: '', rate: '', stock: '', unit: 'pcs', gst: '18' });
@@ -97,7 +104,7 @@ const Inventory: React.FC = () => {
 
   return (
     <Layout>
-      <div className="flex justify-between items-center mb-10">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-10">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Inventory Monitor</h2>
           <p className="text-slate-500 mt-1">Real-time stock valuation and tracking</p>
@@ -108,14 +115,14 @@ const Inventory: React.FC = () => {
             setNewItem({ name: '', category: '', rate: '', stock: '', unit: 'pcs', gst: '18' });
             setIsModalOpen(true);
           }}
-          className="flex items-center gap-3 px-6 py-4 bg-indigo-600 text-white text-sm font-black uppercase tracking-widest rounded-2xl hover:bg-black transition-all shadow-xl shadow-indigo-100"
+          className="flex items-center justify-center gap-3 px-6 py-4 bg-indigo-600 text-white text-sm font-black uppercase tracking-widest rounded-2xl hover:bg-black transition-all shadow-xl shadow-indigo-100 w-full sm:w-auto active:scale-95"
         >
           <Plus className="h-5 w-5" />
           Add Item
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StockStat title="Total SKUs" value={items.length} icon={Layers} color="indigo" />
         <StockStat title="In Stock" value={items.filter(i => i.stock > 0).length} icon={Package} color="emerald" />
         <StockStat title="Out of Stock" value={items.filter(i => i.stock <= 0).length} icon={ShoppingBag} color="rose" />
@@ -233,7 +240,7 @@ const Inventory: React.FC = () => {
                         )}
                       </td>
                       <td className="px-8 py-5 text-right">
-                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                           <button 
                             onClick={() => handleEdit(item)}
                             className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"

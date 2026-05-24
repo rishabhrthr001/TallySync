@@ -3,9 +3,10 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area
 } from 'recharts';
 import { 
-  TrendingUp, TrendingDown, DollarSign, Package, CreditCard
+  TrendingUp, TrendingDown, DollarSign, Package, CreditCard, Plus
 } from 'lucide-react';
 import axios from 'axios';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/format';
@@ -60,11 +61,18 @@ const Dashboard: React.FC = () => {
 
   return (
     <Layout>
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Overview</h2>
           <p className="text-slate-500 mt-1 font-medium">{user?.companyName} - Real-time metrics</p>
         </div>
+        <Link 
+          to="/create-entry"
+          className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-2xl shadow-lg shadow-indigo-100 transition-all active:scale-95 w-full sm:w-auto"
+        >
+          <Plus className="h-4 w-4" />
+          Create Entry
+        </Link>
       </div>
 
       {/* Stats Grid */}

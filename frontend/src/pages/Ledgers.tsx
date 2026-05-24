@@ -51,18 +51,18 @@ const Ledgers: React.FC = () => {
 
   return (
     <Layout>
-      <div className="flex justify-between items-center mb-10">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-10">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Party Balances</h2>
           <p className="text-slate-500 mt-1">Real-time receivables and payables tracking</p>
         </div>
-        <button className="flex items-center space-x-2 px-6 py-3 text-sm font-bold bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95">
+        <button className="flex items-center justify-center space-x-2 px-6 py-3 text-sm font-bold bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95 w-full sm:w-auto">
           <Plus className="h-4 w-4" />
           <span>Add New Party</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
         <StatNode title="Total Parties" value={ledgers.length} icon={Users} color="indigo" />
         <StatNode title="Total Receivables" value={formatCurrency(ledgers.reduce((acc, l) => l.balance > 0 ? acc + l.balance : acc, 0))} icon={ArrowUpRight} color="emerald" positive={true} />
         <StatNode title="Total Payables" value={formatCurrency(Math.abs(ledgers.reduce((acc, l) => l.balance < 0 ? acc + l.balance : acc, 0)))} icon={ArrowDownRight} color="rose" positive={false} />
