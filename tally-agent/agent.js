@@ -206,7 +206,7 @@ async function getStockItemList(companyName) {
     <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
     <SVCURRENTCOMPANY>${escapeXML(resolvedName)}</SVCURRENTCOMPANY>
 </STATICVARIABLES>
-<TDL><TDLMESSAGE><COLLECTION NAME="TallySyncStockItems"><TYPE>Stock Item</TYPE><FETCH>NAME, BASEUNITS, CLOSINGBALANCE</FETCH><METHOD>LASTSALEPRICE : $LASTSALERATE</METHOD><METHOD>STANDARDPRICE : $STANDARDPRICE</METHOD></COLLECTION></TDLMESSAGE></TDL>
+<TDL><TDLMESSAGE><COLLECTION NAME="TallySyncStockItems"><TYPE>Stock Item</TYPE><FETCH>NAME, BASEUNITS, CLOSINGBALANCE, OPENINGRATE, STANDARDCOSTINGRATE, STANDARDSELLINGRATE</FETCH><METHOD>LASTSALEPRICE : $LASTSALERATE</METHOD><METHOD>STANDARDPRICE : $STANDARDPRICE</METHOD><METHOD>LASTPURCHASECOST : $LASTPURCHASECOST</METHOD></COLLECTION></TDLMESSAGE></TDL>
 </DESC></BODY></ENVELOPE>`;
     try {
         const data = await tallyRequest(xml);
@@ -940,12 +940,26 @@ function parseStockItemsFromXml(xml) {
             if (!isNaN(num)) stock = num;
         }
 
-        const priceMatch = block.match(/<STANDARDPRICE>([\s\S]*?)<\/STANDARDPRICE>/i) 
-                        || block.match(/<LASTSALEPRICE>([\s\S]*?)<\/LASTSALEPRICE>/i);
+        // Tally rate fields often come as "1000.00 /Nos" — strip the /unit part before parsing
+        const extractRate = (str) => {
+            if (!str) return 0;
+            const cleaned = str.split('/')[0].trim(); // only keep the number before "/"
+            const num = parseFloat(cleaned.replace(/[^\d.-]/g, ''));
+            return (!isNaN(num) && num > 0) ? num : 0;
+        };
+
+        // Try rate fields in priority order: last sale → standard selling → standard costing → last purchase → opening rate
+        const rateCandidates = [
+            block.match(/<LASTSALEPRICE>([\s\S]*?)<\/LASTSALEPRICE>/i),
+            block.match(/<STANDARDSELLINGRATE>([\s\S]*?)<\/STANDARDSELLINGRATE>/i),
+            block.match(/<STANDARDPRICE>([\s\S]*?)<\/STANDARDPRICE>/i),
+            block.match(/<LASTPURCHASECOST>([\s\S]*?)<\/LASTPURCHASECOST>/i),
+            block.match(/<STANDARDCOSTINGRATE>([\s\S]*?)<\/STANDARDCOSTINGRATE>/i),
+            block.match(/<OPENINGRATE>([\s\S]*?)<\/OPENINGRATE>/i),
+        ];
         let rate = 0;
-        if (priceMatch) {
-            const num = parseFloat(priceMatch[1].replace(/[^\d.-]/g, ''));
-            if (!isNaN(num)) rate = num;
+        for (const m of rateCandidates) {
+            if (m) { const r = extractRate(m[1]); if (r > 0) { rate = r; break; } }
         }
 
         items.push({ name, uom, stock, rate });
