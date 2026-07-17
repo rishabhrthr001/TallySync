@@ -1,0 +1,15 @@
+{
+  "name": "tallysync-agent",
+  "version": "1.0.0",
+  "description": "Local Sync Agent for TallySync",
+  "main": "agent.js",
+  "bin": "agent.js",
+  "pkg": {
+    "targets": ["node18-win-x64"],
+    "assets": [],
+    "outputPath": "."
+  },
+  "dependencies": {
+    "axios": "^1.6.7"
+  }
+}
