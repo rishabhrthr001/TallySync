@@ -185,7 +185,7 @@ async function getLedgerList(companyName) {
     <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
     <SVCURRENTCOMPANY>${escapeXML(resolvedName)}</SVCURRENTCOMPANY>
 </STATICVARIABLES>
-<TDL><TDLMESSAGE><COLLECTION NAME="TallySyncLedgers"><TYPE>Ledger</TYPE><FETCH>NAME, PARENT, PARTYGSTIN</FETCH></COLLECTION></TDLMESSAGE></TDL>
+<TDL><TDLMESSAGE><COLLECTION NAME="TallySyncLedgers"><TYPE>Ledger</TYPE><FETCH>NAME, PARENT, PARTYGSTIN, CLOSINGBALANCE</FETCH></COLLECTION></TDLMESSAGE></TDL>
 </DESC></BODY></ENVELOPE>`;
     try {
         const data = await tallyRequest(xml);
@@ -477,8 +477,8 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers)
     (entry.items || []).forEach(item => {
         const itemQty    = Number(item.quantity) || 0;
         const itemRate   = Number(item.rate) || 0;
-        const itemAmountValue = isSales ? -Math.abs(itemQty * itemRate) : Math.abs(itemQty * itemRate); // Sales: Outward (-) for physical stock deduction, Purchase: Inward (+) for physical stock addition
-        const allocationAmountValue = isSales ? Math.abs(itemAmountValue) : -Math.abs(itemAmountValue); // Ledgers follow accounting sign rules (positive for Credit/Sales income, negative for Debit/Purchase expense)
+        const itemAmountValue = isSales ? Math.abs(itemQty * itemRate) : -Math.abs(itemQty * itemRate); // Sales: Outward (+) Credit, Purchase: Inward (-) Debit
+        const allocationAmountValue = isSales ? Math.abs(itemQty * itemRate) : -Math.abs(itemQty * itemRate); // Sales: Credit (+), Purchase: Debit (-)
         
         const rateStr    = `${itemRate.toFixed(2)}/${escapeXML(item.uom || 'Nos')}`;
         const qtyStr     = fmtQty(itemQty, item.uom || 'Nos');
@@ -505,22 +505,23 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers)
             : -Math.abs(tax.amount); // Purchase: Tax Dr (-)
             
         taxLines += `
-                        <LEDGERENTRIES.LIST>
+                        <ALLLEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(tax.name)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>${isSales ? 'No' : 'Yes'}</ISDEEMEDPOSITIVE>
                             <AMOUNT>${taxAmtValue.toFixed(2)}</AMOUNT>
-                        </LEDGERENTRIES.LIST>`;
+                        </ALLLEDGERENTRIES.LIST>`;
     });
 
     const body = `
                         <ISINVOICE>Yes</ISINVOICE>
                         <ISVATDUTYPAID>Yes</ISVATDUTYPAID>
                         <PARTYLEDGERNAME>${escapeXML(partyName)}</PARTYLEDGERNAME>
-                        <LEDGERENTRIES.LIST>
+                        <PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW>
+                        <ALLLEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyName)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>${isSales ? 'Yes' : 'No'}</ISDEEMEDPOSITIVE>
                             <AMOUNT>${partyAmtValue.toFixed(2)}</AMOUNT>
-                        </LEDGERENTRIES.LIST>
+                        </ALLLEDGERENTRIES.LIST>
                         ${inventoryLines}
                         ${taxLines}`;
 
@@ -961,7 +962,16 @@ function parseLedgersFromXml(xml) {
         const gstinMatch = block.match(/<PARTYGSTIN[^>]*>([\s\S]*?)<\/PARTYGSTIN>/i);
         const gstin = gstinMatch ? unescapeXML(gstinMatch[1].trim()) : '';
 
-        ledgers.push({ name, parent, gstin });
+        // closing balance
+        const balMatch = block.match(/<CLOSINGBALANCE[^>]*>([\s\S]*?)<\/CLOSINGBALANCE>/i);
+        let balance = 0;
+        if (balMatch) {
+            const rawBal = unescapeXML(balMatch[1].trim());
+            const num = parseFloat(rawBal.replace(/[^\d.-]/g, ''));
+            if (!isNaN(num)) balance = num;
+        }
+
+        ledgers.push({ partyName: name, parent, gstin, balance });
     }
     return ledgers;
 }
@@ -978,7 +988,7 @@ async function syncTallyInventoryAndParties(companyName, taskId) {
         // Filter ledgers belonging to party groups (e.g. Sundry Debtors, Sundry Creditors) or cash/bank
         const parties = ledgers.filter(l => 
             ['sundry debtors', 'sundry creditors', 'cash'].includes(l.parent.toLowerCase()) ||
-            l.name.toLowerCase().includes('cash')
+            l.partyName.toLowerCase().includes('cash')
         );
         console.log(`[SYNC-TD]   • Found ${parties.length} party ledgers (Sundry Debtors/Creditors/Cash) in Tally.`);
 
@@ -998,6 +1008,99 @@ async function syncTallyInventoryAndParties(companyName, taskId) {
     }
 }
 
+async function checkPendingInventorySyncs() {
+    try {
+        const res = await axios.get(`${CONFIG.BACKEND_URL}/api/inventory/sync-requests`, {
+            headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+        });
+        const pendingUsers = res.data || [];
+        for (const user of pendingUsers) {
+            const companyName = user.companyName;
+            if (!companyName) continue;
+            console.log(`\n[SYNC-INV] 🔄 Received pending inventory sync request for "${companyName}"...`);
+            try {
+                const resolvedName = await resolveCompanyName(companyName);
+                const stockXml = await getStockItemList(resolvedName);
+                const stockItems = parseStockItemsFromXml(stockXml);
+                console.log(`[SYNC-INV]   • Found ${stockItems.length} stock items in Tally.`);
+                
+                console.log(`[SYNC-INV] Sending inventory data to website...`);
+                const completeRes = await axios.post(`${CONFIG.BACKEND_URL}/api/inventory/sync-complete`, {
+                    companyName,
+                    items: stockItems
+                }, {
+                    headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+                });
+                console.log(`[SYNC-INV] ✅ ${completeRes.data.message || 'Inventory sync complete!'}`);
+            } catch (e) {
+                console.error(`[SYNC-INV] ❌ Failed: ${e.message}`);
+                try {
+                    await axios.post(`${CONFIG.BACKEND_URL}/api/inventory/sync-fail`, {
+                        companyName,
+                        error: e.message
+                    }, {
+                        headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+                    });
+                    console.log(`[SYNC-INV] Reported failure to backend.`);
+                } catch (failErr) {
+                    console.error(`[SYNC-INV] Failed to report failure: ${failErr.message}`);
+                }
+            }
+        }
+    } catch (err) {
+        console.error(`[SYNC-INV] Error checking pending inventory syncs: ${err.message}`);
+    }
+}
+
+async function checkPendingLedgerSyncs() {
+    try {
+        const res = await axios.get(`${CONFIG.BACKEND_URL}/api/ledger/sync-requests`, {
+            headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+        });
+        const pendingUsers = res.data || [];
+        for (const user of pendingUsers) {
+            const companyName = user.companyName;
+            if (!companyName) continue;
+            console.log(`\n[SYNC-LEDG] 🔄 Received pending ledger sync request for "${companyName}"...`);
+            try {
+                const resolvedName = await resolveCompanyName(companyName);
+                const ledgerXml = await getLedgerList(resolvedName);
+                const ledgers = parseLedgersFromXml(ledgerXml);
+                
+                const parties = ledgers.filter(l => 
+                    ['sundry debtors', 'sundry creditors', 'cash'].includes(l.parent.toLowerCase()) ||
+                    l.partyName.toLowerCase().includes('cash')
+                );
+                console.log(`[SYNC-LEDG]   • Found ${parties.length} party ledgers (Sundry Debtors/Creditors/Cash) out of ${ledgers.length} total.`);
+                
+                console.log(`[SYNC-LEDG] Sending ledger data to website...`);
+                const completeRes = await axios.post(`${CONFIG.BACKEND_URL}/api/ledger/sync-complete`, {
+                    companyName,
+                    ledgers: parties
+                }, {
+                    headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+                });
+                console.log(`[SYNC-LEDG] ✅ Ledger sync complete!`);
+            } catch (e) {
+                console.error(`[SYNC-LEDG] ❌ Failed: ${e.message}`);
+                try {
+                    await axios.post(`${CONFIG.BACKEND_URL}/api/ledger/sync-fail`, {
+                        companyName,
+                        error: e.message
+                    }, {
+                        headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+                    });
+                    console.log(`[SYNC-LEDG] Reported failure to backend.`);
+                } catch (failErr) {
+                    console.error(`[SYNC-LEDG] Failed to report failure: ${failErr.message}`);
+                }
+            }
+        }
+    } catch (err) {
+        console.error(`[SYNC-LEDG] Error checking pending ledger syncs: ${err.message}`);
+    }
+}
+
 // ─── MAIN LOOP ───────────────────────────────────────────────────────────────
 
 async function run() {
@@ -1011,7 +1114,11 @@ async function run() {
 
     while (true) {
         try {
-            // Check for pending sync tasks (e.g. fetching inventory/parties from Tally to Cloud)
+            // Check for pending sync requests (e.g. fetching inventory/parties from Tally to Cloud)
+            await checkPendingInventorySyncs();
+            await checkPendingLedgerSyncs();
+
+            // Check for pending sync tasks (e.g. fetching inventory/parties from Tally to Cloud via legacy endpoint)
             try {
                 const taskRes = await axios.get(`${CONFIG.BACKEND_URL}/api/entries/pending-sync-tasks`, {
                     headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
