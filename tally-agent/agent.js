@@ -486,8 +486,8 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers)
     (entry.items || []).forEach(item => {
         const itemQty    = Number(item.quantity) || 0;
         const itemRate   = Number(item.rate) || 0;
-        const itemAmountValue = isSales ? -Math.abs(itemQty * itemRate) : Math.abs(itemQty * itemRate); // Sales: Outward (-) for physical stock deduction, Purchase: Inward (+)
-        const allocationAmountValue = isSales ? Math.abs(itemAmountValue) : -Math.abs(itemAmountValue); // Ledgers: positive for Sales Credit, negative for Purchase Debit
+        const itemAmountValue = isSales ? Math.abs(itemQty * itemRate) : -Math.abs(itemQty * itemRate); // Sales: Outward (+) Credit, Purchase: Inward (-) Debit
+        const allocationAmountValue = itemAmountValue; // Ledgers match inventory entry sign
         
         const rateStr    = `${itemRate.toFixed(2)}/${escapeXML(item.uom || 'Nos')}`;
         const qtyStr     = fmtQty(itemQty, item.uom || 'Nos');
@@ -495,6 +495,7 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers)
         inventoryLines += `
                         <ALLINVENTORYENTRIES.LIST>
                             <STOCKITEMNAME>${escapeXML(item.name)}</STOCKITEMNAME>
+                            <ISDEEMEDPOSITIVE>${isSales ? 'No' : 'Yes'}</ISDEEMEDPOSITIVE>
                             <RATE>${rateStr}</RATE>
                             <AMOUNT>${itemAmountValue.toFixed(2)}</AMOUNT>
                             <ACTUALQTY>${qtyStr}</ACTUALQTY>
@@ -1018,7 +1019,18 @@ function parseLedgersFromXml(xml) {
         const gstinMatch = block.match(/<PARTYGSTIN[^>]*>([\s\S]*?)<\/PARTYGSTIN>/i);
         const gstin = gstinMatch ? unescapeXML(gstinMatch[1].trim()) : '';
 
-        ledgers.push({ partyName, parent, gstin });
+        // parse closing balance and flip the sign: Debit is negative in Tally XML, but positive (receivable) in DB
+        const balMatch = block.match(/<CLOSINGBALANCE[^>]*>([\s\S]*?)<\/CLOSINGBALANCE>/i);
+        let balance = 0;
+        if (balMatch) {
+            const rawBal = unescapeXML(balMatch[1].trim());
+            const num = parseFloat(rawBal.replace(/[^\d.-]/g, ''));
+            if (!isNaN(num)) {
+                balance = -num; // Flip sign: Tally Dr (-) -> DB Dr (+); Tally Cr (+) -> DB Cr (-)
+            }
+        }
+
+        ledgers.push({ partyName, parent, gstin, balance });
     }
     return ledgers;
 }
