@@ -52,6 +52,16 @@ router.post('/', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Clear all inventory items for the authenticated user's company
+router.delete('/clear', authenticateToken, async (req: any, res) => {
+  try {
+    const result = await Item.deleteMany({ companyName: req.user.companyName });
+    res.json({ success: true, deleted: result.deletedCount, message: `Cleared ${result.deletedCount} inventory items.` });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.patch('/:id', authenticateToken, async (req: any, res) => {
   try {
     // Validate unique name per company if name is changing
@@ -237,16 +247,6 @@ router.post('/sync-fail', authenticateToken, async (req: any, res) => {
     );
 
     res.json({ success: true, message: 'Sync failure recorded' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Clear all inventory items for the authenticated user's company
-router.delete('/clear', authenticateToken, async (req: any, res) => {
-  try {
-    const result = await Item.deleteMany({ companyName: req.user.companyName });
-    res.json({ success: true, deleted: result.deletedCount, message: `Cleared ${result.deletedCount} inventory items.` });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
