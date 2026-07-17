@@ -477,8 +477,8 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers)
     (entry.items || []).forEach(item => {
         const itemQty    = Number(item.quantity) || 0;
         const itemRate   = Number(item.rate) || 0;
-        const itemAmountValue = isSales ? Math.abs(itemQty * itemRate) : -Math.abs(itemQty * itemRate); // Sales: Outward (+) Credit, Purchase: Inward (-) Debit
-        const allocationAmountValue = isSales ? Math.abs(itemQty * itemRate) : -Math.abs(itemQty * itemRate); // Sales: Credit (+), Purchase: Debit (-)
+        const itemAmountValue = isSales ? -Math.abs(itemQty * itemRate) : Math.abs(itemQty * itemRate); // Sales: Outward (-) for physical stock deduction, Purchase: Inward (+)
+        const allocationAmountValue = isSales ? Math.abs(itemAmountValue) : -Math.abs(itemAmountValue); // Ledgers: positive for Sales Credit, negative for Purchase Debit
         
         const rateStr    = `${itemRate.toFixed(2)}/${escapeXML(item.uom || 'Nos')}`;
         const qtyStr     = fmtQty(itemQty, item.uom || 'Nos');
@@ -505,23 +505,22 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers)
             : -Math.abs(tax.amount); // Purchase: Tax Dr (-)
             
         taxLines += `
-                        <ALLLEDGERENTRIES.LIST>
+                        <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(tax.name)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>${isSales ? 'No' : 'Yes'}</ISDEEMEDPOSITIVE>
                             <AMOUNT>${taxAmtValue.toFixed(2)}</AMOUNT>
-                        </ALLLEDGERENTRIES.LIST>`;
+                        </LEDGERENTRIES.LIST>`;
     });
 
     const body = `
                         <ISINVOICE>Yes</ISINVOICE>
                         <ISVATDUTYPAID>Yes</ISVATDUTYPAID>
                         <PARTYLEDGERNAME>${escapeXML(partyName)}</PARTYLEDGERNAME>
-                        <PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW>
-                        <ALLLEDGERENTRIES.LIST>
+                        <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyName)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>${isSales ? 'Yes' : 'No'}</ISDEEMEDPOSITIVE>
                             <AMOUNT>${partyAmtValue.toFixed(2)}</AMOUNT>
-                        </ALLLEDGERENTRIES.LIST>
+                        </LEDGERENTRIES.LIST>
                         ${inventoryLines}
                         ${taxLines}`;
 
@@ -921,13 +920,19 @@ function parseStockItemsFromXml(xml) {
     const blocks = xml.split(/<STOCKITEM/gi);
     for (let i = 1; i < blocks.length; i++) {
         const block = blocks[i];
-        const nameMatch = block.match(/<NAME[^>]*>([\s\S]*?)<\/NAME>/i);
-        if (!nameMatch) continue;
-        const name = unescapeXML(nameMatch[1].trim());
-        const uomMatch = block.match(/<BASEUNITS[^>]*>([\s\S]*?)<\/BASEUNITS>/i);
+        // Try NAME attribute first (e.g. NAME="Item"), then strict <NAME> child element
+        // Do NOT use /<NAME[^>]*>/ — it also matches <NAME.LIST> which wraps names in some Tally versions
+        const nameAttrMatch = block.match(/^\s*NAME="([^"]+)"/i);
+        const nameTagMatch  = block.match(/<NAME>([\s\S]*?)<\/NAME>/i);
+        const rawName = nameAttrMatch ? nameAttrMatch[1] : (nameTagMatch ? nameTagMatch[1] : null);
+        if (!rawName) continue;
+        const name = unescapeXML(rawName.trim());
+        if (!name) continue;
+
+        const uomMatch = block.match(/<BASEUNITS>([\s\S]*?)<\/BASEUNITS>/i);
         const uom = uomMatch ? unescapeXML(uomMatch[1].trim()) : 'Nos';
         
-        const balMatch = block.match(/<CLOSINGBALANCE[^>]*>([\s\S]*?)<\/CLOSINGBALANCE>/i);
+        const balMatch = block.match(/<CLOSINGBALANCE>([\s\S]*?)<\/CLOSINGBALANCE>/i);
         let stock = 0;
         if (balMatch) {
             const rawBal = unescapeXML(balMatch[1].trim());
@@ -935,8 +940,8 @@ function parseStockItemsFromXml(xml) {
             if (!isNaN(num)) stock = num;
         }
 
-        const priceMatch = block.match(/<STANDARDPRICE[^>]*>([\s\S]*?)<\/STANDARDPRICE>/i) 
-                        || block.match(/<LASTSALEPRICE[^>]*>([\s\S]*?)<\/LASTSALEPRICE>/i);
+        const priceMatch = block.match(/<STANDARDPRICE>([\s\S]*?)<\/STANDARDPRICE>/i) 
+                        || block.match(/<LASTSALEPRICE>([\s\S]*?)<\/LASTSALEPRICE>/i);
         let rate = 0;
         if (priceMatch) {
             const num = parseFloat(priceMatch[1].replace(/[^\d.-]/g, ''));
@@ -954,24 +959,21 @@ function parseLedgersFromXml(xml) {
     const blocks = xml.split(/<LEDGER/gi);
     for (let i = 1; i < blocks.length; i++) {
         const block = blocks[i];
-        const nameMatch = block.match(/<NAME[^>]*>([\s\S]*?)<\/NAME>/i);
-        if (!nameMatch) continue;
-        const name = unescapeXML(nameMatch[1].trim());
-        const parentMatch = block.match(/<PARENT[^>]*>([\s\S]*?)<\/PARENT>/i);
-        const parent = parentMatch ? unescapeXML(parentMatch[1].trim()) : 'Sundry Debtors';
-        const gstinMatch = block.match(/<PARTYGSTIN[^>]*>([\s\S]*?)<\/PARTYGSTIN>/i);
+        // Try NAME attribute first (e.g. NAME="Party"), then strict <NAME> child element
+        // Do NOT use /<NAME[^>]*>/ — it also matches <NAME.LIST> which wraps names in some Tally versions
+        const nameAttrMatch = block.match(/^\s*NAME="([^"]+)"/i);
+        const nameTagMatch  = block.match(/<NAME>([\s\S]*?)<\/NAME>/i);
+        const rawName = nameAttrMatch ? nameAttrMatch[1] : (nameTagMatch ? nameTagMatch[1] : null);
+        if (!rawName) continue;
+        const partyName = unescapeXML(rawName.trim());
+        if (!partyName) continue;
+
+        const parentMatch = block.match(/<PARENT>([\s\S]*?)<\/PARENT>/i);
+        const parent = parentMatch ? unescapeXML(parentMatch[1].trim()) : '';
+        const gstinMatch = block.match(/<PARTYGSTIN>([\s\S]*?)<\/PARTYGSTIN>/i);
         const gstin = gstinMatch ? unescapeXML(gstinMatch[1].trim()) : '';
 
-        // closing balance
-        const balMatch = block.match(/<CLOSINGBALANCE[^>]*>([\s\S]*?)<\/CLOSINGBALANCE>/i);
-        let balance = 0;
-        if (balMatch) {
-            const rawBal = unescapeXML(balMatch[1].trim());
-            const num = parseFloat(rawBal.replace(/[^\d.-]/g, ''));
-            if (!isNaN(num)) balance = num;
-        }
-
-        ledgers.push({ partyName: name, parent, gstin, balance });
+        ledgers.push({ partyName, parent, gstin });
     }
     return ledgers;
 }
