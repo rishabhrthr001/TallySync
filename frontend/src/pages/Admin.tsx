@@ -24,12 +24,14 @@ import {
   LogOut,
   ArrowLeft,
   TrendingUp,
-  BarChart3
+  BarChart3,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import axios from 'axios';
 import { formatCurrency } from '../utils/format';
+import Layout from '../components/Layout';
 
 interface User {
   _id: string;
@@ -57,7 +59,7 @@ interface Entry {
 }
 
 export default function Admin() {
-  const { user: currentUser, logout } = useAuth();
+  const { user: currentUser } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -69,6 +71,10 @@ export default function Admin() {
   const [selectedCompanyForReport, setSelectedCompanyForReport] = useState<User | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   
+  // Search state
+  const [syncSearchTerm, setSyncSearchTerm] = useState('');
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newClient, setNewClient] = useState({
     name: '',
@@ -82,7 +88,7 @@ export default function Admin() {
   const [modalError, setModalError] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
   
-  // New states for Manage Firm functionality
+  // Edit & delete states
   const [editingClient, setEditingClient] = useState<User | null>(null);
   const [clientToDelete, setClientToDelete] = useState<User | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
@@ -90,11 +96,6 @@ export default function Admin() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
-  };
-
-  const handleExit = () => {
-    logout();
-    navigate('/login');
   };
 
   const handleTabChange = (tab: 'entries' | 'clients' | 'reports') => {
@@ -139,8 +140,10 @@ export default function Admin() {
       const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
       await axios.patch(`/api/entries/${id}/status`, { status }, { headers });
       setEntries(prev => prev.map(e => e._id === id ? { ...e, status: status as any } : e));
+      showToast(`Voucher status marked as ${status}`);
     } catch (error) {
       console.error('Failed to update status:', error);
+      showToast('Failed to update voucher status', 'error');
     } finally {
       setProcessingId(null);
     }
@@ -152,8 +155,10 @@ export default function Admin() {
       const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
       await axios.post(`/api/entries/${id}/retry`, {}, { headers });
       setEntries(prev => prev.map(e => e._id === id ? { ...e, status: 'pending' } : e));
+      showToast('Re-queued voucher sync job');
     } catch (error) {
       console.error('Failed to retry entry:', error);
+      showToast('Failed to re-queue sync job', 'error');
     } finally {
       setProcessingId(null);
     }
@@ -187,7 +192,7 @@ export default function Admin() {
       const res = await axios.patch(`/api/admin/clients/${editingClient._id}`, editingClient, { headers });
       setUsers(prev => prev.map(u => u._id === editingClient._id ? res.data : u));
       setEditingClient(null);
-      showToast('Firm profile updated');
+      showToast('Firm profile updated successfully');
     } catch (error: any) {
       setModalError(error.response?.data?.error || 'Failed to update client');
     } finally {
@@ -212,264 +217,416 @@ export default function Admin() {
     }
   };
 
+  const filteredEntries = entries.filter(e => {
+    const matchesSearch = 
+      e.companyName.toLowerCase().includes(syncSearchTerm.toLowerCase()) ||
+      e.partyName.toLowerCase().includes(syncSearchTerm.toLowerCase()) ||
+      (e.invoiceNumber && e.invoiceNumber.toLowerCase().includes(syncSearchTerm.toLowerCase()));
+    return matchesSearch;
+  });
+
+  const filteredClients = users.filter(u => {
+    if (u.role !== 'client') return false;
+    const matchesSearch = 
+      u.name.toLowerCase().includes(clientSearchTerm.toLowerCase()) ||
+      u.email.toLowerCase().includes(clientSearchTerm.toLowerCase()) ||
+      (u.companyName && u.companyName.toLowerCase().includes(clientSearchTerm.toLowerCase())) ||
+      (u.gstin && u.gstin.toLowerCase().includes(clientSearchTerm.toLowerCase()));
+    return matchesSearch;
+  });
+
   if (loading) return (
-    <div className="flex flex-col items-center justify-center h-screen bg-slate-50">
+    <div className="flex flex-col items-center justify-center h-screen bg-slate-50/50">
       <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
-      <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Accessing Control Vault...</p>
+      <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Accessing Control Vault...</p>
     </div>
   );
 
   return (
-    <div className="max-w-7xl mx-auto space-y-10 py-8">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-slate-200 pb-10">
+    <Layout>
+      {/* Header section */}
+      <div className="flex flex-col lg:flex-row justify-between lg:items-end gap-6 mb-8 border-b border-slate-200/60 pb-8">
         <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="px-3 py-1 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full">System Admin</div>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tight">Mainframe Dashboard</h1>
-          </div>
-          <p className="text-slate-500 font-medium text-lg leading-relaxed">Oversee multi-tenant synchronization and firm accounts</p>
+          <span className="text-xs font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-wider font-mono">System Admin</span>
+          <h2 className="text-3xl font-black text-slate-900 tracking-tight mt-1.5 font-sans">Mainframe Dashboard</h2>
+          <p className="text-slate-400 text-sm font-semibold mt-0.5">Oversee multi-tenant synchronization log and tenant profiles</p>
         </div>
-        <div className="flex flex-col sm:flex-row md:flex-row items-center gap-4 w-full md:w-auto">
+        
+        {/* Navigation Tabs */}
+        <div className="flex bg-slate-100/80 p-1 rounded-2xl border border-slate-200/50 max-w-full overflow-x-auto whitespace-nowrap self-start lg:self-auto">
           <button
-            onClick={() => navigate('/dashboard')}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-50 text-indigo-600 font-black uppercase tracking-widest text-[10px] rounded-xl border border-indigo-100 hover:bg-indigo-100 transition-all shadow-sm active:scale-95 w-full sm:w-auto"
+            onClick={() => handleTabChange('entries')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeTab === 'entries' ? 'bg-white text-indigo-600 shadow-md shadow-indigo-500/5' : 'text-slate-500 hover:text-slate-800'
+            }`}
           >
-            <Building2 className="w-4 h-4" />
-            Go to Main Dashboard
+            Sync Queue
           </button>
           <button
-            onClick={handleExit}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-rose-50 text-rose-600 font-black uppercase tracking-widest text-[10px] rounded-xl border border-rose-100 hover:bg-rose-100 transition-all shadow-sm active:scale-95 w-full sm:w-auto"
+            onClick={() => handleTabChange('clients')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeTab === 'clients' ? 'bg-white text-indigo-600 shadow-md shadow-indigo-500/5' : 'text-slate-500 hover:text-slate-800'
+            }`}
           >
-            <LogOut className="w-4 h-4" />
-            Logout
+            Firm Network
           </button>
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto max-w-full whitespace-nowrap w-full sm:w-auto">
-            <button
-              onClick={() => handleTabChange('entries')}
-              className={`flex-shrink-0 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-                activeTab === 'entries' ? 'bg-white text-indigo-600 shadow-xl shadow-indigo-100' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Entry Stream
-            </button>
-            <button
-              onClick={() => handleTabChange('clients')}
-              className={`flex-shrink-0 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-                activeTab === 'clients' ? 'bg-white text-indigo-600 shadow-xl shadow-indigo-100' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Firm Network
-            </button>
-            <button
-              onClick={() => handleTabChange('reports')}
-              className={`flex-shrink-0 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-                activeTab === 'reports' ? 'bg-white text-indigo-600 shadow-xl shadow-indigo-100' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Company Reports
-            </button>
-          </div>
+          <button
+            onClick={() => handleTabChange('reports')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeTab === 'reports' ? 'bg-white text-indigo-600 shadow-md shadow-indigo-500/5' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Company Reports
+          </button>
         </div>
       </div>
 
       {activeTab === 'entries' && (
-        <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-2xl shadow-slate-200/50">
-          <div className="p-8 border-b border-slate-100 flex items-center justify-between">
-            <h2 className="font-black text-slate-900 text-xl flex items-center gap-3">
-              <RefreshCcw className="w-6 h-6 text-indigo-600" />
-              Real-time Sync Queue
-            </h2>
-            <div className="flex gap-2">
-              <div className="px-4 py-2 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-xl border border-emerald-100">Live Agent Active</div>
+        <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.02)] overflow-hidden">
+          {/* Filters Bar */}
+          <div className="p-5 border-b border-slate-150 flex flex-col sm:flex-row gap-4 items-center bg-slate-50/50">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-4 top-3.5 h-4.5 w-4.5 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Search log queue by firm, party, invoice..." 
+                value={syncSearchTerm}
+                onChange={(e) => setSyncSearchTerm(e.target.value)}
+                className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm placeholder:text-slate-350"
+              />
             </div>
+            
+            <button onClick={fetchData} className="p-3 text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl shadow-sm transition-colors cursor-pointer self-stretch sm:self-auto flex items-center justify-center">
+              <RefreshCcw className="h-4.5 w-4.5" />
+            </button>
           </div>
-          <div className="overflow-x-auto min-h-[500px]">
+
+          {/* Desktop Sync Log Table */}
+          <div className="hidden lg:block overflow-x-auto min-h-[400px]">
             <table className="w-full text-left">
               <thead>
-                <tr className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] border-b border-slate-100">
-                  <th className="px-10 py-6">Firm & Timeline</th>
-                  <th className="px-10 py-6">Voucher Mapping</th>
-                  <th className="px-10 py-6">Impact Value</th>
-                  <th className="px-10 py-6 text-center">Tally Status</th>
-                  <th className="px-10 py-6 text-right">Overrides</th>
+                <tr className="bg-slate-50/50 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] border-b border-slate-150">
+                  <th className="px-8 py-5">Firm & Timeline</th>
+                  <th className="px-8 py-5">Voucher Mapping</th>
+                  <th className="px-8 py-5">Impact Value</th>
+                  <th className="px-8 py-5 text-center">Tally Status</th>
+                  <th className="px-8 py-5 text-right">Overrides</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
-                {entries.map(entry => (
-                  <tr key={entry._id} className="hover:bg-indigo-50/30 transition-all group">
-                    <td className="px-10 py-8">
-                      <div className="text-base font-black text-slate-900 leading-tight">{entry.companyName || entry.userName}</div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase mt-1">Logged: {format(new Date(entry.createdAt), 'MMM d, HH:mm')}</div>
-                    </td>
-                    <td className="px-10 py-8">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${entry.type === 'sales' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
-                          {entry.type}
+              <tbody className="divide-y divide-slate-100 text-sm">
+                <AnimatePresence>
+                  {filteredEntries.map((entry, idx) => {
+                    const isSuccess = entry.status === 'success';
+                    const isPending = entry.status === 'pending';
+                    const isFailed = entry.status === 'failed';
+                    return (
+                      <motion.tr 
+                        key={entry._id}
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.98 }}
+                        transition={{ delay: idx * 0.01 }}
+                        className="hover:bg-slate-50/30 transition-all font-semibold text-slate-750 group"
+                      >
+                        <td className="px-8 py-5">
+                          <span className="font-bold text-slate-900 block leading-tight">{entry.companyName || entry.userName}</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1 block">
+                            {format(new Date(entry.createdAt), 'MMM d, HH:mm')}
+                          </span>
+                        </td>
+                        <td className="px-8 py-5">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                              entry.type === 'sales' ? 'bg-indigo-50 text-indigo-750 border border-indigo-100' : 'bg-amber-50 text-amber-750 border border-amber-100'
+                            }`}>
+                              {entry.type}
+                            </span>
+                            <span className="font-mono text-xs font-bold text-slate-800">{entry.invoiceNumber || 'NO-REF'}</span>
+                          </div>
+                          <span className="text-xs text-slate-400 font-semibold block">Party: {entry.partyName}</span>
+                        </td>
+                        <td className="px-8 py-5 font-mono text-slate-900 font-bold text-base">
+                          {formatCurrency(entry.totalAmount)}
+                        </td>
+                        <td className="px-8 py-5 text-center">
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                            isSuccess ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
+                            isPending ? 'bg-amber-50 text-amber-700 border border-amber-100' : 
+                            'bg-rose-50 text-rose-700 border border-rose-100'
+                          } border`}>
+                            {entry.status}
+                          </span>
+                        </td>
+                        <td className="px-8 py-5 text-right">
+                          <div className="flex justify-end gap-2">
+                            {isFailed && (
+                              <button
+                                onClick={() => handleRetry(entry._id)}
+                                disabled={processingId === entry._id}
+                                className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                                title="Retry synchronization"
+                              >
+                                <RefreshCcw className={`w-4 h-4 ${processingId === entry._id ? 'animate-spin' : ''}`} />
+                              </button>
+                            )}
+                            {isPending && (
+                              <div className="flex justify-end gap-1.5">
+                                <button
+                                  onClick={() => updateStatus(entry._id, 'success')}
+                                  disabled={processingId === entry._id}
+                                  className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer"
+                                  title="Approve manual success override"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => updateStatus(entry._id, 'failed')}
+                                  disabled={processingId === entry._id}
+                                  className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                                  title="Reject sync log"
+                                >
+                                  <XCircle className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </motion.tr>
+                    );
+                  })}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Sync Queue Card List */}
+          <div className="block lg:hidden p-4 space-y-4">
+            <AnimatePresence>
+              {filteredEntries.map((entry, idx) => {
+                const isSuccess = entry.status === 'success';
+                const isPending = entry.status === 'pending';
+                const isFailed = entry.status === 'failed';
+                return (
+                  <motion.div
+                    key={entry._id}
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.98 }}
+                    transition={{ delay: idx * 0.01 }}
+                    className="bg-slate-50/50 p-5 rounded-2xl border border-slate-200/80 space-y-4 shadow-sm"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900 leading-tight">{entry.companyName || entry.userName}</h4>
+                        <span className="text-[10px] font-bold text-slate-400 mt-1 uppercase block">
+                          Logged: {format(new Date(entry.createdAt), 'MMM d, HH:mm')}
                         </span>
-                        <span className="text-sm font-bold text-slate-800 italic">{entry.invoiceNumber || 'NO-REF'}</span>
                       </div>
-                      <div className="text-xs text-slate-400 font-medium">Party: {entry.partyName}</div>
-                    </td>
-                    <td className="px-10 py-8">
-                      <div className="text-xl font-black text-slate-900">{formatCurrency(entry.totalAmount)}</div>
-                      <div className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><Hash className="w-3 h-3" /> Ledger Posting</div>
-                    </td>
-                    <td className="px-10 py-8">
-                      <div className="flex flex-col items-center">
-                        <span className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-2xl ${
-                          entry.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
-                          entry.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 
-                          'bg-rose-50 text-rose-700 border border-rose-100'
-                        }`}>
-                          {entry.status}
-                        </span>
+                      <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border ${
+                        isSuccess ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                        isPending ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                        'bg-rose-50 text-rose-700 border-rose-100'
+                      }`}>
+                        {entry.status}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 border-t border-slate-200/60 pt-3">
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Voucher</span>
+                        <span className="text-xs font-bold text-slate-700 uppercase">{entry.type} • {entry.invoiceNumber || 'NO-REF'}</span>
                       </div>
-                    </td>
-                    <td className="px-10 py-8 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {entry.status === 'failed' && (
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Amount</span>
+                        <span className="text-xs font-black text-slate-900 font-mono">{formatCurrency(entry.totalAmount)}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="border-t border-slate-200/60 pt-3 flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-400">Party: {entry.partyName}</span>
+                      <div className="flex gap-2">
+                        {isFailed && (
                           <button
                             onClick={() => handleRetry(entry._id)}
                             disabled={processingId === entry._id}
-                            className="p-3 text-indigo-600 hover:bg-white rounded-2xl shadow-sm border border-slate-100 transition-all hover:scale-110"
+                            className="p-2 text-indigo-600 bg-white border border-slate-200 rounded-xl"
                           >
-                            <RefreshCcw className={`w-5 h-5 ${processingId === entry._id ? 'animate-spin' : ''}`} />
+                            <RefreshCcw className={`w-4 h-4 ${processingId === entry._id ? 'animate-spin' : ''}`} />
                           </button>
                         )}
-                        {entry.status === 'pending' && (
-                          <div className="flex gap-2">
+                        {isPending && (
+                          <div className="flex gap-1">
                             <button
                               onClick={() => updateStatus(entry._id, 'success')}
-                              className="p-3 text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all"
+                              disabled={processingId === entry._id}
+                              className="p-2 text-emerald-600 bg-white border border-slate-200 rounded-xl"
                             >
-                              <CheckCircle2 className="w-5 h-5" />
+                              <CheckCircle2 className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => updateStatus(entry._id, 'failed')}
-                              className="p-3 text-rose-600 hover:bg-rose-50 rounded-2xl transition-all"
+                              disabled={processingId === entry._id}
+                              className="p-2 text-rose-600 bg-white border border-slate-200 rounded-xl"
                             >
-                              <XCircle className="w-5 h-5" />
+                              <XCircle className="w-4 h-4" />
                             </button>
                           </div>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           </div>
+
+          {filteredEntries.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+              <FileText className="h-14 w-14 opacity-20 mb-4" />
+              <p className="font-bold text-lg text-slate-700">No sync entries queued</p>
+            </div>
+          )}
         </div>
       )}
 
       {activeTab === 'clients' && (
-        <div className="space-y-8">
-          <div className="flex items-center justify-between">
-            <div className="relative flex-1 max-w-xl">
-              <Search className="absolute left-5 top-4 h-5 w-5 text-slate-400" />
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-4 top-3.5 h-4.5 w-4.5 text-slate-400" />
               <input 
                 type="text" 
-                placeholder="Search firm network by name, email, or company..." 
-                className="w-full pl-14 pr-6 py-4 bg-white border border-slate-200 rounded-3xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none shadow-xl shadow-slate-200/30"
+                placeholder="Search firm network by name, email, GSTIN..." 
+                value={clientSearchTerm}
+                onChange={(e) => setClientSearchTerm(e.target.value)}
+                className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm placeholder:text-slate-350"
               />
             </div>
             <button 
-              onClick={() => setIsModalOpen(true)}
-              className="flex items-center gap-3 px-8 py-4 bg-indigo-600 text-white text-sm font-black uppercase tracking-widest rounded-[2rem] hover:bg-indigo-700 transition-all shadow-2xl shadow-indigo-200 active:scale-95"
+              onClick={() => {
+                setModalError('');
+                setNewClient({ name: '', email: '', password: '', companyName: '', gstin: '', phone: '', address: '' });
+                setIsModalOpen(true);
+              }}
+              className="flex items-center justify-center gap-3 px-6 py-3.5 bg-indigo-600 text-white text-xs font-bold uppercase tracking-wider rounded-2xl hover:bg-slate-900 transition-all shadow-lg shadow-indigo-500/10 active:scale-95 cursor-pointer"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4 stroke-[2.5]" />
               Register New Firm
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {users.filter(u => u.role === 'client').map(client => (
-              <div key={client._id} className="bg-white p-8 rounded-[3rem] border border-slate-200 hover:border-indigo-400 transition-all group shadow-xl shadow-slate-200/50 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-start justify-between mb-6">
-                    <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-[2rem] flex items-center justify-center text-2xl font-black text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-500 rotate-6 group-hover:rotate-0 shadow-lg">
-                      {client.companyName?.[0] || client.name[0]}
+          {/* Firm cards grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <AnimatePresence>
+              {filteredClients.map((client, idx) => (
+                <motion.div 
+                  key={client._id}
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 15 }}
+                  transition={{ delay: idx * 0.02 }}
+                  className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.02)] hover:border-indigo-300 hover:shadow-lg transition-all duration-300 flex flex-col justify-between group"
+                >
+                  <div>
+                    <div className="flex items-start justify-between mb-5">
+                      <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-lg font-black group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300 shadow-sm uppercase">
+                        {client.companyName?.[0] || client.name[0]}
+                      </div>
+                      <span className="px-3 py-1 bg-emerald-55 border border-emerald-100 rounded-full text-[9px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50">
+                        Active Tenant
+                      </span>
                     </div>
-                    <span className="px-3 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest rounded-full border border-emerald-100">
-                      Standard Firm
-                    </span>
-                  </div>
-                  <h3 className="text-xl font-black text-slate-900 mb-1 leading-tight group-hover:text-indigo-600 transition-colors">{client.companyName || 'Unmapped Firm'}</h3>
-                  <div className="flex items-center gap-2 text-slate-400 text-xs font-bold mb-6">
-                    <Building className="w-3 h-3" /> {client.name}
+                    
+                    <h3 className="text-lg font-black text-slate-900 leading-snug group-hover:text-indigo-600 transition-colors">
+                      {client.companyName || 'Unmapped Firm'}
+                    </h3>
+                    <p className="text-xs text-slate-400 font-bold flex items-center gap-1.5 mt-1.5">
+                      <Building className="w-3.5 h-3.5 text-slate-355" /> {client.name}
+                    </p>
+                    
+                    <div className="space-y-2.5 pt-5 border-t border-slate-100 mt-5">
+                      <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
+                        <Hash className="w-4 h-4 text-slate-350 shrink-0" />
+                        <span className="truncate">{client.gstin || 'GST Unregistered'}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
+                        <Phone className="w-4 h-4 text-slate-350 shrink-0" />
+                        <span>{client.phone || 'No Phone Number'}</span>
+                      </div>
+                    </div>
                   </div>
                   
-                  <div className="space-y-3 pt-6 border-t border-slate-50">
-                    <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
-                      <Hash className="w-4 h-4 text-slate-300" />
-                      <span>{client.gstin || 'No GST Mapping'}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
-                      <Phone className="w-4 h-4 text-slate-300" />
-                      <span>{client.phone || 'No Contact'}</span>
+                  <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-300">
+                      Added {client.createdAt ? format(new Date(client.createdAt), 'MMM yyyy') : 'N/A'}
+                    </span>
+                    <div className="flex gap-1.5">
+                      <button 
+                        onClick={() => {
+                          setSelectedCompanyForReport(client);
+                          setActiveTab('reports');
+                          setSearchParams({ tab: 'reports' });
+                        }}
+                        className="p-2 text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl transition-all"
+                        title="View sync report details"
+                      >
+                        <TrendingUp className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setModalError('');
+                          setEditingClient({ ...client });
+                        }}
+                        className="p-2 text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl transition-all"
+                        title="Edit profile"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => setClientToDelete(client)}
+                        className="p-2 text-rose-550 bg-slate-50 hover:bg-rose-50 border border-slate-100 rounded-xl transition-all"
+                        title="Terminate client instance"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                </div>
-                
-                <div className="mt-8 pt-6 border-t border-slate-50 flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase text-slate-300 italic">Member since {format(new Date(client.createdAt || Date.now()), 'MMM yyyy')}</span>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => {
-                        setSelectedCompanyForReport(client);
-                        setActiveTab('reports');
-                        setSearchParams({ tab: 'reports' });
-                      }}
-                      className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
-                      title="View Report"
-                    >
-                      <TrendingUp className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => setEditingClient(client)}
-                      className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
-                      title="Edit Firm"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => setClientToDelete(client)}
-                      className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
-                      title="Delete Firm"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
+
+          {filteredClients.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+              <Users className="h-14 w-14 opacity-20 mb-4" />
+              <p className="font-bold text-lg text-slate-700">No firm accounts found</p>
+            </div>
+          )}
         </div>
       )}
 
       {activeTab === 'reports' && (
         selectedCompanyForReport ? (
-          <div className="bg-white rounded-[2.5rem] border border-slate-200 p-10 shadow-2xl shadow-slate-200/50 space-y-8">
+          <div className="bg-white rounded-3xl border border-slate-200/60 p-6 md:p-8 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.02)] space-y-6">
             <button
               onClick={() => setSelectedCompanyForReport(null)}
-              className="flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-800 mb-4 transition-colors"
+              className="flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-800 transition-colors text-sm font-sans"
             >
-              <ArrowLeft className="w-5 h-5" /> Back to Company List
+              <ArrowLeft className="w-4.5 h-4.5" /> Back to Network List
             </button>
             
-            <div className="border-b border-slate-100 pb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="border-b border-slate-150 pb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-3xl font-black text-slate-900 leading-tight">
+                <h2 className="text-2xl font-black text-slate-900 leading-tight">
                   {selectedCompanyForReport.companyName || 'Unmapped Firm'}
                 </h2>
-                <p className="text-slate-500 font-medium text-sm mt-1">
-                  Firm report & activity overview for Tally synchronizations.
+                <p className="text-slate-400 text-xs font-semibold mt-1">
+                  Firm report & activity overview for PhotoBill synchronizations
                 </p>
               </div>
-              <div className="px-5 py-3 bg-indigo-50 border border-indigo-100 rounded-2xl flex flex-col justify-center">
-                <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Sync Success Rate</span>
-                <span className="text-2xl font-black text-indigo-700 mt-1">
+              <div className="px-5 py-3.5 border border-indigo-100 rounded-2xl flex flex-col justify-center bg-indigo-50 self-start sm:self-auto min-w-[140px]">
+                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-650">Sync Success Rate</span>
+                <span className="text-2xl font-black text-indigo-700 mt-1 font-mono">
                   {(() => {
                     const compEntries = entries.filter(e => e.companyName === selectedCompanyForReport.companyName);
                     const success = compEntries.filter(e => e.status === 'success').length;
@@ -480,7 +637,7 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* Firm info & Stats */}
+            {/* Firm Info & Stats cards */}
             {(() => {
               const compEntries = entries.filter(e => e.companyName === selectedCompanyForReport.companyName);
               const successCount = compEntries.filter(e => e.status === 'success').length;
@@ -497,55 +654,57 @@ export default function Admin() {
 
               return (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Vouchers</div>
-                      <div className="text-3xl font-black text-slate-800 mt-2">{compEntries.length}</div>
-                      <div className="text-[10px] text-slate-400 mt-1 font-bold">All-time uploaded</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-200/60">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block leading-none">Total Vouchers</span>
+                      <h4 className="text-2xl font-black text-slate-800 mt-2 font-mono leading-tight">{compEntries.length}</h4>
+                      <p className="text-[9px] text-slate-400 mt-1 font-semibold leading-none">All-time uploaded</p>
                     </div>
-                    <div className="bg-emerald-50/50 p-6 rounded-3xl border border-emerald-100/50">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Total Sales Value</div>
-                      <div className="text-3xl font-black text-emerald-700 mt-2">{formatCurrency(totalSales)}</div>
-                      <div className="text-[10px] text-emerald-600 mt-1 font-bold">Successful syncs</div>
+                    <div className="bg-emerald-50/30 p-5 rounded-2xl border border-emerald-100/50">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 block leading-none">Total Sales Value</span>
+                      <h4 className="text-2xl font-black text-emerald-700 mt-2 font-mono leading-tight">{formatCurrency(totalSales)}</h4>
+                      <p className="text-[9px] text-emerald-600 mt-1 font-semibold leading-none">Successful syncs</p>
                     </div>
-                    <div className="bg-amber-50/50 p-6 rounded-3xl border border-amber-100/50">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-amber-600">Total Purchase Value</div>
-                      <div className="text-3xl font-black text-amber-700 mt-2">{formatCurrency(totalPurchases)}</div>
-                      <div className="text-[10px] text-amber-600 mt-1 font-bold">Successful syncs</div>
+                    <div className="bg-amber-50/30 p-5 rounded-2xl border border-amber-100/50">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 block leading-none">Total Purchase Value</span>
+                      <h4 className="text-2xl font-black text-amber-700 mt-2 font-mono leading-tight">{formatCurrency(totalPurchases)}</h4>
+                      <p className="text-[9px] text-amber-600 mt-1 font-semibold leading-none">Successful syncs</p>
                     </div>
-                    <div className="bg-rose-50/50 p-6 rounded-3xl border border-rose-100/50">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-rose-600">Failed / Pending</div>
-                      <div className="text-3xl font-black text-rose-700 mt-2">
-                        {failedCount} <span className="text-slate-400 text-sm font-bold">/</span> {pendingCount}
-                      </div>
-                      <div className="text-[10px] text-rose-600 mt-1 font-bold">Requires attention</div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-                    <div>
-                      <div className="text-xs text-slate-400 font-bold uppercase">Owner / Representative</div>
-                      <div className="text-base font-black text-slate-700 mt-1">{selectedCompanyForReport.name}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-400 font-bold uppercase">Official Email</div>
-                      <div className="text-base font-black text-slate-700 mt-1">{selectedCompanyForReport.email}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-400 font-bold uppercase">GSTIN / Tax ID</div>
-                      <div className="text-base font-black text-slate-700 mt-1">{selectedCompanyForReport.gstin || 'N/A'}</div>
+                    <div className="bg-rose-50/30 p-5 rounded-2xl border border-rose-100/50">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-rose-600 block leading-none">Failed / Pending</span>
+                      <h4 className="text-2xl font-black text-rose-700 mt-2 font-mono leading-tight">
+                        {failedCount} <span className="text-slate-450 text-sm font-medium">/</span> {pendingCount}
+                      </h4>
+                      <p className="text-[9px] text-rose-600 mt-1 font-semibold leading-none">Requires attention</p>
                     </div>
                   </div>
 
-                  {/* Table of company entries */}
-                  <div className="border border-slate-100 rounded-3xl overflow-hidden bg-white shadow-sm">
-                    <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-                      <h4 className="font-black text-slate-900">Recent Sync History</h4>
+                  <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-200/60 grid grid-cols-1 sm:grid-cols-3 gap-5 text-sm">
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Owner / Representative</span>
+                      <span className="text-sm font-bold text-slate-700 mt-1 block leading-tight">{selectedCompanyForReport.name}</span>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Official Email</span>
+                      <span className="text-sm font-bold text-slate-700 mt-1 block leading-tight">{selectedCompanyForReport.email}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">GSTIN / Tax ID</span>
+                      <span className="text-sm font-bold text-slate-700 mt-1 block leading-tight">{selectedCompanyForReport.gstin || 'N/A'}</span>
+                    </div>
+                  </div>
+
+                  {/* Vouchers list */}
+                  <div className="border border-slate-200/60 rounded-3xl overflow-hidden bg-white shadow-sm">
+                    <div className="p-5 border-b border-slate-150 bg-slate-50/50">
+                      <h4 className="font-black text-slate-900 text-sm">Recent Sync History</h4>
+                    </div>
+                    
+                    {/* Desktop Sync History Table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-left text-xs">
                         <thead>
-                          <tr className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-widest border-b border-slate-100">
+                          <tr className="bg-slate-50/50 text-slate-400 text-[9px] font-black uppercase tracking-widest border-b border-slate-150">
                             <th className="px-6 py-4">Timeline</th>
                             <th className="px-6 py-4">Voucher No</th>
                             <th className="px-6 py-4">Party</th>
@@ -554,20 +713,22 @@ export default function Admin() {
                             <th className="px-6 py-4 text-center">Status</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-50 font-semibold text-slate-700">
+                        <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
                           {compEntries.slice(0, 15).map(e => (
                             <tr key={e._id} className="hover:bg-slate-50/30 transition-all">
-                              <td className="px-6 py-4 text-xs text-slate-400">{format(new Date(e.createdAt), 'MMM d, HH:mm')}</td>
+                              <td className="px-6 py-4 text-slate-400">{format(new Date(e.createdAt), 'MMM d, HH:mm')}</td>
                               <td className="px-6 py-4 font-mono font-bold text-slate-900">{e.invoiceNumber || 'N/A'}</td>
                               <td className="px-6 py-4">{e.partyName}</td>
                               <td className="px-6 py-4">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${e.type === 'sales' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                                <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider border ${
+                                  e.type === 'sales' ? 'bg-indigo-50 text-indigo-750 border-indigo-100' : 'bg-amber-50 text-amber-755 border-amber-100'
+                                }`}>
                                   {e.type}
                                 </span>
                               </td>
-                              <td className="px-6 py-4 text-right font-bold text-slate-900">{formatCurrency(e.totalAmount)}</td>
+                              <td className="px-6 py-4 text-right font-bold text-slate-900 font-mono">{formatCurrency(e.totalAmount)}</td>
                               <td className="px-6 py-4 text-center">
-                                <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
+                                <span className={`text-[8px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full ${
                                   e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
                                   e.status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 
                                   'bg-rose-50 text-rose-700 border border-rose-100'
@@ -585,33 +746,65 @@ export default function Admin() {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Mobile Sync History List */}
+                    <div className="block md:hidden p-4 space-y-4">
+                      {compEntries.slice(0, 15).map(e => {
+                        const isSuccess = e.status === 'success';
+                        const isPending = e.status === 'pending';
+                        return (
+                          <div key={e._id} className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/80 space-y-3">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <span className="text-[10px] text-slate-400 font-bold">{format(new Date(e.createdAt), 'MMM d, HH:mm')}</span>
+                                <h5 className="text-xs font-black text-slate-900 font-mono mt-0.5">{e.invoiceNumber || 'N/A'}</h5>
+                              </div>
+                              <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase border ${
+                                isSuccess ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                                isPending ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                                'bg-rose-50 text-rose-700 border-rose-100'
+                              }`}>
+                                {e.status}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-slate-500 font-semibold">{e.partyName} ({e.type})</span>
+                              <span className="font-black text-slate-900 font-mono">{formatCurrency(e.totalAmount)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {compEntries.length === 0 && (
+                        <p className="text-center py-8 text-slate-400 font-bold text-sm">No entries found for this firm.</p>
+                      )}
+                    </div>
                   </div>
                 </>
               );
             })()}
           </div>
         ) : (
-          <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-2xl shadow-slate-200/50">
-            <div className="p-8 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="font-black text-slate-900 text-xl flex items-center gap-3">
-                <BarChart3 className="w-6 h-6 text-indigo-600" />
-                Company-Wise Report Overview
+          <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.02)] overflow-hidden">
+            <div className="p-6 border-b border-slate-150 bg-slate-50/50">
+              <h2 className="font-black text-slate-900 text-lg flex items-center gap-3">
+                <BarChart3 className="w-5 h-5 text-indigo-600" />
+                Company Reports Overview
               </h2>
             </div>
             
             <div className="overflow-x-auto">
-              <table className="w-full text-left">
+              <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] border-b border-slate-100">
-                    <th className="px-10 py-6">Company / Firm Name</th>
-                    <th className="px-10 py-6 text-center">Total Vouchers</th>
-                    <th className="px-10 py-6 text-center">Success Vouchers</th>
-                    <th className="px-10 py-6 text-center">Failed Vouchers</th>
-                    <th className="px-10 py-6 text-center">Success Rate</th>
-                    <th className="px-10 py-6 text-right">Actions</th>
+                  <tr className="bg-slate-50/50 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] border-b border-slate-150">
+                    <th className="px-8 py-5">Company / Firm Name</th>
+                    <th className="px-8 py-5 text-center">Total Vouchers</th>
+                    <th className="px-8 py-5 text-center">Success</th>
+                    <th className="px-8 py-5 text-center">Failed</th>
+                    <th className="px-8 py-5 text-center">Sync Ratio</th>
+                    <th className="px-8 py-5 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-slate-100 font-semibold text-slate-750">
                   {users.filter(u => u.role === 'client').map(client => {
                     const compEntries = entries.filter(e => e.companyName === client.companyName);
                     const success = compEntries.filter(e => e.status === 'success').length;
@@ -620,16 +813,16 @@ export default function Admin() {
                     const successRate = total > 0 ? Math.round((success / total) * 100) : 100;
                     
                     return (
-                      <tr key={client._id} className="hover:bg-indigo-50/30 transition-all group">
-                        <td className="px-10 py-8">
-                          <div className="text-base font-black text-slate-900 leading-tight">{client.companyName || 'Unmapped Firm'}</div>
-                          <div className="text-[10px] text-slate-400 font-bold uppercase mt-1">Owner: {client.name}</div>
+                      <tr key={client._id} className="hover:bg-slate-50/30 transition-all">
+                        <td className="px-8 py-5">
+                          <span className="font-bold text-slate-900 block leading-tight">{client.companyName || 'Unmapped Firm'}</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1 block">Owner: {client.name}</span>
                         </td>
-                        <td className="px-10 py-8 text-center font-bold text-slate-700">{total}</td>
-                        <td className="px-10 py-8 text-center font-bold text-emerald-600">{success}</td>
-                        <td className="px-10 py-8 text-center font-bold text-rose-500">{failed}</td>
-                        <td className="px-10 py-8 text-center">
-                          <span className={`px-3 py-1 rounded-full text-xs font-black uppercase ${
+                        <td className="px-8 py-5 text-center font-bold text-slate-700 font-mono">{total}</td>
+                        <td className="px-8 py-5 text-center font-bold text-emerald-600 font-mono">{success}</td>
+                        <td className="px-8 py-5 text-center font-bold text-rose-500 font-mono">{failed}</td>
+                        <td className="px-8 py-5 text-center">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
                             successRate >= 90 ? 'bg-emerald-50 text-emerald-700' :
                             successRate >= 50 ? 'bg-amber-50 text-amber-700' :
                             'bg-rose-50 text-rose-700'
@@ -637,10 +830,10 @@ export default function Admin() {
                             {successRate}%
                           </span>
                         </td>
-                        <td className="px-10 py-8 text-right">
+                        <td className="px-8 py-5 text-right">
                           <button
                             onClick={() => setSelectedCompanyForReport(client)}
-                            className="px-4 py-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all"
+                            className="px-4 py-2 bg-indigo-50 hover:bg-indigo-650 text-indigo-600 hover:text-white text-[10px] font-black uppercase tracking-wider rounded-xl transition-all shadow-sm active:scale-95"
                           >
                             View Report
                           </button>
@@ -678,259 +871,316 @@ export default function Admin() {
       </AnimatePresence>
 
       {/* Delete Confirmation Modal */}
-      {clientToDelete && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[60] flex items-center justify-center p-4">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
-          >
-            <div className="p-8 text-center space-y-6">
-              <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-3xl flex items-center justify-center mx-auto mb-4">
-                <AlertCircle className="w-10 h-10" />
+      <AnimatePresence>
+        {clientToDelete && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl border border-slate-200/85 overflow-hidden"
+            >
+              <div className="p-8 text-center space-y-5">
+                <div className="w-16 h-16 bg-rose-50 text-rose-550 rounded-2xl flex items-center justify-center mx-auto mb-2 shadow-sm border border-rose-100">
+                  <AlertCircle className="w-8 h-8" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight">Terminate Firm Instance?</h3>
+                  <p className="text-slate-505 font-semibold text-sm mt-2 leading-relaxed">
+                    This will permanently delete <span className="font-extrabold text-slate-800">"{clientToDelete.companyName || clientToDelete.name}"</span> from the database. All synchronization queues and access keys will be invalidated.
+                  </p>
+                </div>
+                <div className="flex gap-3 pt-3">
+                  <button 
+                    onClick={() => setClientToDelete(null)}
+                    className="flex-1 py-3 bg-slate-50 border border-slate-200 font-bold uppercase tracking-wider text-xs rounded-xl hover:bg-slate-100 transition-all cursor-pointer text-slate-500"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleDeleteClient}
+                    className="flex-1 py-3 bg-rose-600 text-white font-bold uppercase tracking-wider text-xs rounded-xl hover:bg-rose-750 shadow-md shadow-rose-200 transition-all cursor-pointer"
+                  >
+                    Terminate Firm
+                  </button>
+                </div>
               </div>
-              <div>
-                <h3 className="text-2xl font-black text-slate-900">Terminate Firm?</h3>
-                <p className="text-slate-500 font-medium mt-2">
-                  This will permanently remove <span className="font-bold text-slate-700">"{clientToDelete.companyName || clientToDelete.name}"</span> and all associated access. This action cannot be undone.
-                </p>
-              </div>
-              <div className="flex gap-4 pt-4">
-                <button 
-                  onClick={() => setClientToDelete(null)}
-                  className="flex-1 py-4 bg-slate-100 text-slate-600 font-black uppercase tracking-widest text-[10px] rounded-2xl hover:bg-slate-200"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleDeleteClient}
-                  className="flex-1 py-4 bg-rose-500 text-white font-black uppercase tracking-widest text-[10px] rounded-2xl hover:bg-rose-600 shadow-xl shadow-rose-200"
-                >
-                  Yes, Terminate
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Edit Client Modal */}
-      {editingClient && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white w-full max-w-2xl rounded-[3rem] shadow-[0_40px_100px_rgba(0,0,0,0.2)] overflow-hidden"
-          >
-            <div className="p-10 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h3 className="text-2xl font-black text-slate-900">Edit Firm Profile</h3>
-                <p className="text-slate-400 text-sm font-medium">Update configurations for {editingClient.companyName}</p>
-              </div>
-              <button 
-                onClick={() => setEditingClient(null)} 
-                className="w-12 h-12 bg-slate-50 flex items-center justify-center rounded-2xl hover:bg-slate-100 transition-colors"
-              >
-                <XCircle className="w-7 h-7 text-slate-300" />
-              </button>
-            </div>
-            
-            <form onSubmit={handleUpdateClient} className="p-10 space-y-8">
-              {modalError && (
-                <div className="p-4 bg-rose-50 text-rose-700 text-sm rounded-2xl flex items-center gap-3 font-bold">
-                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                  {modalError}
+      <AnimatePresence>
+        {editingClient && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl border border-slate-200/85 overflow-hidden my-8"
+            >
+              <div className="p-6 md:p-8 border-b border-slate-150 flex justify-between items-center bg-slate-50/50">
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight">Edit Firm Profile</h3>
+                  <p className="text-slate-400 text-xs font-semibold mt-0.5">Modify owner details, tax parameters, and contact coordinates</p>
                 </div>
-              )}
+                <button onClick={() => setEditingClient(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer p-1">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Owner Name</label>
-                  <input 
-                    required
-                    type="text" 
-                    value={editingClient.name}
-                    onChange={e => setEditingClient({...editingClient, name: e.target.value})}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none"
-                  />
+              <form onSubmit={handleUpdateClient} className="p-6 md:p-8 space-y-5">
+                {modalError && (
+                  <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 text-xs font-bold flex gap-2 items-center">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{modalError}</span>
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Owner Name</label>
+                    <input 
+                      required
+                      type="text" 
+                      value={editingClient.name}
+                      onChange={e => setEditingClient({...editingClient, name: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Firm Email</label>
+                    <input 
+                      required
+                      type="email" 
+                      value={editingClient.email}
+                      onChange={e => setEditingClient({...editingClient, email: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Firm Email</label>
-                  <input 
-                    required
-                    type="email" 
-                    value={editingClient.email}
-                    onChange={e => setEditingClient({...editingClient, email: e.target.value})}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none"
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Official Company Name</label>
-                <div className="relative">
-                  <Building2 className="absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-                  <input 
-                    required
-                    type="text" 
-                    value={editingClient.companyName}
-                    onChange={e => setEditingClient({...editingClient, companyName: e.target.value})}
-                    className="w-full pl-14 pr-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none"
-                  />
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Official Company Name</label>
+                  <div className="relative">
+                    <Building2 className="absolute left-4 top-4 h-4.5 w-4.5 text-slate-450" />
+                    <input 
+                      required
+                      type="text" 
+                      value={editingClient.companyName || ''}
+                      onChange={e => setEditingClient({...editingClient, companyName: e.target.value})}
+                      className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">GSTIN</label>
-                  <input 
-                    type="text" 
-                    value={editingClient.gstin}
-                    onChange={e => setEditingClient({...editingClient, gstin: e.target.value})}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">GSTIN</label>
+                    <input 
+                      type="text" 
+                      value={editingClient.gstin || ''}
+                      onChange={e => setEditingClient({...editingClient, gstin: e.target.value.toUpperCase()})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350 uppercase"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Phone Number</label>
+                    <input 
+                      type="text" 
+                      value={editingClient.phone || ''}
+                      onChange={e => setEditingClient({...editingClient, phone: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                    />
+                  </div>
                 </div>
+
                 <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Update Password (Optional)</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Billing Address</label>
+                  <div className="relative">
+                    <MapPin className="absolute left-4 top-4 h-4.5 w-4.5 text-slate-450" />
+                    <input 
+                      type="text" 
+                      value={editingClient.address || ''}
+                      onChange={e => setEditingClient({...editingClient, address: e.target.value})}
+                      className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Update Access Key (Optional)</label>
                   <input 
                     type="password" 
                     onChange={e => setEditingClient({...editingClient, password: e.target.value} as any)}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none"
-                    placeholder="Leave blank to keep current"
+                    className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all"
+                    placeholder="Leave blank to preserve existing key"
                   />
                 </div>
-              </div>
 
-              <div className="flex gap-4 pt-4">
-                <button 
-                  type="button"
-                  onClick={() => setEditingClient(null)}
-                  className="px-8 py-5 bg-slate-100 text-slate-600 font-black uppercase tracking-widest text-[10px] rounded-3xl hover:bg-slate-200 transition-all flex-1"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  disabled={modalLoading}
-                  className="px-8 py-5 bg-indigo-600 text-white font-black uppercase tracking-widest text-[10px] rounded-3xl hover:bg-indigo-700 shadow-2xl shadow-indigo-100 transition-all flex-[2] flex items-center justify-center gap-3 disabled:opacity-50"
-                >
-                  {modalLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Save Profile Changes'}
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </div>
-      )}
+                <div className="flex gap-4 pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => setEditingClient(null)}
+                    className="flex-1 py-4 bg-slate-50 border border-slate-200 text-slate-500 font-bold uppercase tracking-wider rounded-2xl hover:bg-slate-100 transition-all text-xs cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={modalLoading}
+                    className="flex-[2] py-4 bg-indigo-600 text-white font-black uppercase tracking-wider rounded-2xl shadow-lg shadow-indigo-500/10 hover:bg-slate-900 transition-all text-xs cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {modalLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Profile Changes'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Add Client Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-[0_40px_100px_rgba(0,0,0,0.2)] overflow-hidden">
-            <div className="p-10 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h3 className="text-2xl font-black text-slate-900">Provision Firm Profile</h3>
-                <p className="text-slate-400 text-sm font-medium">Create a managed instance for a new firm</p>
-              </div>
-              <button 
-                onClick={() => setIsModalOpen(false)} 
-                className="w-12 h-12 bg-slate-50 flex items-center justify-center rounded-2xl hover:bg-slate-100 transition-colors"
-              >
-                <XCircle className="w-7 h-7 text-slate-300" />
-              </button>
-            </div>
-            
-            <form onSubmit={handleCreateClient} className="p-10 space-y-8">
-              {modalError && (
-                <div className="p-4 bg-rose-50 text-rose-700 text-sm rounded-2xl flex items-center gap-3 font-bold">
-                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                  {modalError}
+      <AnimatePresence>
+        {isModalOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl border border-slate-200/85 overflow-hidden my-8"
+            >
+              <div className="p-6 md:p-8 border-b border-slate-150 flex justify-between items-center bg-slate-50/50">
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight">Provision Tenant Firm</h3>
+                  <p className="text-slate-400 text-xs font-semibold mt-0.5">Initialize a managed instance for a new corporate firm</p>
                 </div>
-              )}
+                <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer p-1">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Owner Name</label>
-                  <input 
-                    required
-                    type="text" 
-                    value={newClient.name}
-                    onChange={e => setNewClient({...newClient, name: e.target.value})}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all"
-                    placeholder="Full Name"
-                  />
+              <form onSubmit={handleCreateClient} className="p-6 md:p-8 space-y-5">
+                {modalError && (
+                  <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 text-xs font-bold flex gap-2 items-center">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{modalError}</span>
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Owner Name</label>
+                    <input 
+                      required
+                      type="text" 
+                      value={newClient.name}
+                      onChange={e => setNewClient({...newClient, name: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                      placeholder="E.g., John Doe"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Firm Email</label>
+                    <input 
+                      required
+                      type="email" 
+                      value={newClient.email}
+                      onChange={e => setNewClient({...newClient, email: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                      placeholder="firm@company.com"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Firm Email</label>
-                  <input 
-                    required
-                    type="email" 
-                    value={newClient.email}
-                    onChange={e => setNewClient({...newClient, email: e.target.value})}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all"
-                    placeholder="firm@domain.com"
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Official Company Name</label>
-                <div className="relative">
-                  <Building2 className="absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-                  <input 
-                    required
-                    type="text" 
-                    value={newClient.companyName}
-                    onChange={e => setNewClient({...newClient, companyName: e.target.value})}
-                    className="w-full pl-14 pr-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none"
-                    placeholder="PhotoBill Private Limited"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">GSTIN</label>
-                  <input 
-                    type="text" 
-                    value={newClient.gstin}
-                    onChange={e => setNewClient({...newClient, gstin: e.target.value})}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none"
-                    placeholder="27ABCDE..."
-                  />
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Official Company Name</label>
+                  <div className="relative">
+                    <Building2 className="absolute left-4 top-4 h-4.5 w-4.5 text-slate-450" />
+                    <input 
+                      required
+                      type="text" 
+                      value={newClient.companyName}
+                      onChange={e => setNewClient({...newClient, companyName: e.target.value})}
+                      className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                      placeholder="E.g., Acme Corporation Pvt Ltd"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Access Key</label>
-                  <input 
-                    required
-                    type="password" 
-                    value={newClient.password}
-                    onChange={e => setNewClient({...newClient, password: e.target.value})}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none"
-                    placeholder="••••••••"
-                  />
-                </div>
-              </div>
 
-              <div className="flex gap-4 pt-4">
-                <button 
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-8 py-5 bg-slate-100 text-slate-600 font-black uppercase tracking-widest text-[10px] rounded-3xl hover:bg-slate-200 transition-all flex-1"
-                >
-                  Terminate Request
-                </button>
-                <button 
-                  type="submit"
-                  disabled={modalLoading}
-                  className="px-8 py-5 bg-indigo-600 text-white font-black uppercase tracking-widest text-[10px] rounded-3xl hover:bg-indigo-700 shadow-2xl shadow-indigo-100 transition-all flex-[2] flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
-                >
-                  {modalLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Confirm Profile Creation'}
-                </button>
-              </div>
-            </form>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">GSTIN</label>
+                    <input 
+                      type="text" 
+                      value={newClient.gstin}
+                      onChange={e => setNewClient({...newClient, gstin: e.target.value.toUpperCase()})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350 uppercase"
+                      placeholder="E.g., 27AAAAA0000A1Z5"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Phone Number</label>
+                    <input 
+                      type="text" 
+                      value={newClient.phone}
+                      onChange={e => setNewClient({...newClient, phone: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                      placeholder="E.g., +91 9876543210"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Billing Address</label>
+                  <div className="relative">
+                    <MapPin className="absolute left-4 top-4 h-4.5 w-4.5 text-slate-450" />
+                    <input 
+                      type="text" 
+                      value={newClient.address}
+                      onChange={e => setNewClient({...newClient, address: e.target.value})}
+                      className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                      placeholder="E.g., 404 Industrial Estate, Sector 7"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2 col-span-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Access Key</label>
+                    <input 
+                      required
+                      type="password" 
+                      value={newClient.password}
+                      onChange={e => setNewClient({...newClient, password: e.target.value})}
+                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-4 pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="flex-1 py-4 bg-slate-50 border border-slate-200 text-slate-500 font-bold uppercase tracking-wider rounded-2xl hover:bg-slate-100 transition-all text-xs cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={modalLoading}
+                    className="flex-[2] py-4 bg-indigo-600 text-white font-black uppercase tracking-wider rounded-2xl shadow-lg shadow-indigo-500/10 hover:bg-slate-900 transition-all text-xs cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {modalLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Profile Creation'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </AnimatePresence>
+    </Layout>
   );
 }

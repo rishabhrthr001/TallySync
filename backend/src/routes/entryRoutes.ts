@@ -4,11 +4,156 @@ import Item from '../models/Item.js';
 import Ledger from '../models/Ledger.js';
 import { authenticateToken, isAdmin } from '../middleware/auth.js';
 import multer from 'multer';
-import { PDFParse } from 'pdf-parse';
+import { LiteParse } from '@llamaindex/liteparse';
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 const router = express.Router();
+
+
+// Shared helper function for document OCR parsing
+async function parseAndExtractInvoice(buffer: Buffer, originalname: string) {
+  const parser = new LiteParse({ ocrEnabled: true });
+  const result = await parser.parse(buffer);
+  const text = result.text;
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  
+  // 1. IMPROVED INVOICE NUMBER
+  let invoiceNumber = '';
+  const invPatterns = [
+    /(?:Invoice No|INV|Invoice Number|Bill No|SI\s*No|Ref[:\s]|Document No)[:\s#-]*([A-Za-z0-9/-]+)/i,
+     /^[A-Z]{2,3}[\d-]{4,11}$/
+  ];
+  for (const p of invPatterns) {
+     const match = text.match(p);
+     if (match && match[1]) {
+       invoiceNumber = match[1].trim();
+       break;
+     }
+  }
+  
+  const isImage = /\.(jpg|jpeg|png)$/i.test(originalname);
+  const prefix = isImage ? 'IMG' : 'PDF';
+  if (!invoiceNumber) invoiceNumber = `${prefix}-${Math.floor(Math.random() * 9000) + 1000}`;
+
+  // 2. STICKY DATE EXTRACTION
+  let dateMatch = '';
+  const datePatterns = [
+     /(?:Date|Invoice Date|Inv Date|Period|Dated)[:\s#-]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+     /(\d{1,2}[\s](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[,\s]+\d{4})/i
+  ];
+  for (const p of datePatterns) {
+     const match = text.match(p);
+     if (match && match[1]) {
+       dateMatch = match[1].trim();
+       break;
+     }
+  }
+  if (!dateMatch) dateMatch = new Date().toISOString().split('T')[0];
+
+  // 3. PARTY NAME
+  let partyName = '';
+  const partyPatterns = [
+     /(?:M\/s|Messers|Buyer|To|Billed To|Customer|Consignee|Sold To)[:\s-]+([A-Z\s\.&,]{3,50})(?:\r?\n|$)/i,
+     /(?:Party Name|Seller|Vendor)[:\s-]+([A-Z\s\.&,]{3,50})(?:\r?\n|$)/i
+  ];
+  for (const p of partyPatterns) {
+     const match = text.match(p);
+     if (match && match[1]) {
+       partyName = match[1].trim();
+       break;
+     }
+  }
+  if (!partyName || partyName.toLowerCase().includes('tax invoice')) {
+     const skipKeywords = ['tax', 'invoice', 'original', 'duplicate', 'bill'];
+     const candidateLines = lines.slice(0, 10).filter(l => 
+        !skipKeywords.some(k => l.toLowerCase().includes(k)) && l.length > 5
+     );
+     if (candidateLines.length > 1) partyName = candidateLines[1];
+  }
+  if (!partyName) partyName = 'Unknown Party';
+
+  // 3.5 GSTIN EXTRACTION
+  let partyGstin = '';
+  const gstinMatch = text.match(/\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}/);
+  if (gstinMatch) {
+     partyGstin = gstinMatch[0];
+  }
+
+  // Determine GST Type based on GSTIN (27 is Maharashtra, local)
+  let gstType = 'cgst-sgst';
+  if (partyGstin && !partyGstin.startsWith('27')) {
+     gstType = 'igst';
+  }
+
+  // 4. AMOUNT EXTRACTIONS (Taxable, Tax/GST, Grand Total)
+  const taxableMatch = text.match(/(?:Sub Total|Taxable Value|Taxable Amount|Assessable Value|Total Taxable Value|Before Tax)[\s:#-]*[^\d]*\s*([\d,]+\.?\d*)/i);
+  let taxableAmount = taxableMatch ? parseFloat(taxableMatch[1].replace(/,/g, '')) : 0;
+
+  const totalMatch = text.match(/(?:Total Amount|Grand Total|Total|Payable|Net Due|Amount Due|Total Payable)[\s:#-]*[^\d]*\s*([\d,]+\.?\d*)/i);
+  let totalAmount = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : 0;
+
+  let taxAmount = 0;
+  const cgstMatch = text.match(/(?:CGST|Central Tax)[\s:#-]*[^\d]*\s*([\d,]+\.?\d*)/i);
+  const sgstMatch = text.match(/(?:SGST|State Tax)[\s:#-]*[^\d]*\s*([\d,]+\.?\d*)/i);
+  const igstMatch = text.match(/(?:IGST|Integrated Tax)[\s:#-]*[^\d]*\s*([\d,]+\.?\d*)/i);
+  const totalTaxMatch = text.match(/(?:Total Tax|Tax Amount|GST Amount|Total GST)[\s:#-]*[^\d]*\s*([\d,]+\.?\d*)/i);
+
+  if (cgstMatch && sgstMatch) {
+    const cgst = parseFloat(cgstMatch[1].replace(/,/g, ''));
+    const sgst = parseFloat(sgstMatch[1].replace(/,/g, ''));
+    if (!isNaN(cgst) && !isNaN(sgst)) {
+      taxAmount = cgst + sgst;
+    }
+  } else if (igstMatch) {
+    const igst = parseFloat(igstMatch[1].replace(/,/g, ''));
+    if (!isNaN(igst)) {
+      taxAmount = igst;
+    }
+  } else if (totalTaxMatch) {
+    const totalTax = parseFloat(totalTaxMatch[1].replace(/,/g, ''));
+    if (!isNaN(totalTax)) {
+      taxAmount = totalTax;
+    }
+  }
+
+  // Harmonize total, taxable, and tax amounts
+  if (totalAmount > 0 && taxAmount > 0 && taxableAmount === 0) {
+    taxableAmount = totalAmount - taxAmount;
+  } else if (taxableAmount > 0 && taxAmount > 0 && totalAmount === 0) {
+    totalAmount = taxableAmount + taxAmount;
+  } else if (totalAmount > 0 && taxableAmount > 0 && taxAmount === 0) {
+    taxAmount = totalAmount - taxableAmount;
+  } else if (totalAmount > 0 && taxAmount === 0 && taxableAmount === 0) {
+    taxableAmount = totalAmount / 1.18;
+    taxAmount = totalAmount - taxableAmount;
+  }
+
+  taxableAmount = Number(taxableAmount.toFixed(2));
+  taxAmount = Number(taxAmount.toFixed(2));
+  totalAmount = Number(totalAmount.toFixed(2));
+
+  const items = [
+     { name: 'Extracted Total (Verify in Modal)', quantity: 1, rate: taxableAmount }
+  ];
+
+  return {
+    extractedEntry: {
+      type: 'purchase', 
+      partyName,
+      partyGstin,
+      invoiceNumber,
+      date: dateMatch,
+      items,
+      taxableAmount,
+      taxAmount,
+      totalAmount,
+      gstType,
+      notes: `Automatically parsed from ${prefix}`
+    },
+    rawText: text.substring(0, 2000)
+  };
+}
 
 // GET all entries for user/admin
 router.post('/upload-pdf', authenticateToken, upload.single('pdf'), async (req: any, res) => {
@@ -16,98 +161,29 @@ router.post('/upload-pdf', authenticateToken, upload.single('pdf'), async (req: 
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
-
-    const parser = new PDFParse({ data: req.file.buffer });
-    const result = await parser.getText();
-    const text = result.text;
-    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-    
-    // 1. IMPROVED INVOICE NUMBER
-    let invoiceNumber = '';
-    const invPatterns = [
-      /(?:Invoice No|INV|Invoice Number|Bill No|SI\s*No|Ref[:\s]|Document No)[:\s#-]*([A-Za-z0-9/-]+)/i,
-       /^[A-Z]{2,3}[\d-]{4,11}$/
-    ];
-    for (const p of invPatterns) {
-       const match = text.match(p);
-       if (match && match[1]) {
-         invoiceNumber = match[1].trim();
-         break;
-       }
-    }
-    if (!invoiceNumber) invoiceNumber = `PDF-${Math.floor(Math.random() * 9000) + 1000}`;
-
-    // 2. STICKY DATE EXTRACTION
-    let dateMatch = '';
-    const datePatterns = [
-       /(?:Date|Invoice Date|Inv Date|Period|Dated)[:\s#-]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
-       /(\d{1,2}[\s](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[,\s]+\d{4})/i
-    ];
-    for (const p of datePatterns) {
-       const match = text.match(p);
-       if (match && match[1]) {
-         dateMatch = match[1].trim();
-         break;
-       }
-    }
-    if (!dateMatch) dateMatch = new Date().toISOString().split('T')[0];
-
-    // 3. PARTY NAME
-    let partyName = '';
-    const partyPatterns = [
-       /(?:M\/s|Messers|Buyer|To|Billed To|Customer|Consignee|Sold To)[:\s-]+([A-Z\s\.&,]{3,50})(?:\r?\n|$)/i,
-       /(?:Party Name|Seller|Vendor)[:\s-]+([A-Z\s\.&,]{3,50})(?:\r?\n|$)/i
-    ];
-    for (const p of partyPatterns) {
-       const match = text.match(p);
-       if (match && match[1]) {
-         partyName = match[1].trim();
-         break;
-       }
-    }
-    if (!partyName || partyName.toLowerCase().includes('tax invoice')) {
-       const skipKeywords = ['tax', 'invoice', 'original', 'duplicate', 'bill'];
-       const candidateLines = lines.slice(0, 10).filter(l => 
-          !skipKeywords.some(k => l.toLowerCase().includes(k)) && l.length > 5
-       );
-       if (candidateLines.length > 1) partyName = candidateLines[1];
-    }
-    if (!partyName) partyName = 'Unknown Party';
-
-    // 3.5 GSTIN EXTRACTION
-    let partyGstin = '';
-    const gstinMatch = text.match(/\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}/);
-    if (gstinMatch) {
-       partyGstin = gstinMatch[0];
-    }
-
-    // 4. TOTAL AMOUNT
-    const totalMatch = text.match(/(?:Total Amount|Grand Total|Total|Payable|Net Due|Amount Due|Total Payable)[\s:#-]*[^\d]*\s*([\d,]+\.?\d*)/i);
-    const totalAmount = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : 0;
-    
-    const items = [
-       { name: 'Extracted Total (Verify in Modal)', quantity: 1, rate: totalAmount }
-    ];
-
-    const extractedEntry = {
-      type: 'purchase', 
-      partyName,
-      partyGstin,
-      invoiceNumber,
-      date: dateMatch,
-      items,
-      taxableAmount: totalAmount > 0 ? (totalAmount / 1.18) : 0,
-       taxAmount: totalAmount > 0 ? (totalAmount - (totalAmount / 1.18)) : 0,
-      totalAmount: totalAmount > 0 ? totalAmount : 0,
-       notes: 'Automatically parsed from PDF'
-    };
-
-    res.json({ success: true, data: extractedEntry, rawText: text.substring(0, 2000) }); 
+    const { extractedEntry, rawText } = await parseAndExtractInvoice(req.file.buffer, req.file.originalname);
+    res.json({ success: true, data: extractedEntry, rawText }); 
   } catch (error: any) {
     console.error('PDF parsing error DETAIL:', error);
     res.status(500).json({ error: `Failed to parse PDF: ${error.message}` });
   }
 });
+
+// Generic route to accept any document format (PDF, PNG, JPG, JPEG)
+router.post('/upload-document', authenticateToken, upload.any(), async (req: any, res) => {
+  try {
+    const file = req.files?.[0] as Express.Multer.File;
+    if (!file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const { extractedEntry, rawText } = await parseAndExtractInvoice(file.buffer, file.originalname);
+    res.json({ success: true, data: extractedEntry, rawText }); 
+  } catch (error: any) {
+    console.error('Document parsing error DETAIL:', error);
+    res.status(500).json({ error: `Failed to parse document: ${error.message}` });
+  }
+});
+
 
 router.get('/', authenticateToken, async (req: any, res) => {
   try {

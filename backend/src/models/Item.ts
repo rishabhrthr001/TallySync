@@ -10,6 +10,8 @@ const itemSchema = new mongoose.Schema({
   rate: { type: Number, default: 0 },
   gst: { type: Number, default: 18 },
   unit: { type: String, default: 'pcs' },
+  sku: { type: String, default: '' },
+  images: { type: [String], default: [] },
   updatedAt: { type: Date, default: Date.now }
 });
 

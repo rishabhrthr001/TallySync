@@ -21,6 +21,7 @@ import entryRoutes from './routes/entryRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import ledgerRoutes from './routes/ledgerRoutes.js';
+import recognitionRoutes from './routes/recognitionRoutes.js';
 
 dotenv.config();
 
@@ -34,10 +35,11 @@ async function startServer() {
   await connectDB();
 
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use(cors({
     origin: [
-      'https://tallysync-frontend-1020363630918.us-central1.run.app',
+      'https://photobill-frontend-1020363630918.us-central1.run.app',
       'http://localhost:3000',
       'http://localhost:5173',
       'http://127.0.0.1:3000',
@@ -47,28 +49,31 @@ async function startServer() {
   }));
   app.use(cookieParser());
 
-  // Global UTF-8 charset for all responses
+  // Global UTF-8 charset and cache-disabling headers for all responses
   app.use((req, res, next) => {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     next();
   });
 
   // Seed Admin User
   const seedAdmin = async () => {
     try {
-      let admin = await User.findOne({ email: 'pankaj@tallySync.com' });
+      let admin = await User.findOne({ email: 'pankaj@photoBill.com' });
       const hashedPassword = await bcrypt.hash('pankaj@9999', 10);
       
       if (!admin) {
         admin = new User({
           name: 'Pankaj Admin',
-          email: 'pankaj@tallySync.com',
+          email: 'pankaj@photoBill.com',
           password: hashedPassword,
           role: 'admin',
           companyName: 'PhotoBill Main'
         });
         await admin.save();
-        console.log('Admin user seeded: pankaj@tallySync.com / pankaj@9999');
+        console.log('Admin user seeded: pankaj@photoBill.com / pankaj@9999');
       } else {
         // Force update password to requested one
         admin.password = hashedPassword;
@@ -87,6 +92,7 @@ async function startServer() {
   app.use('/api/entries', entryRoutes);
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/ledger', ledgerRoutes);
+  app.use('/api/product-recognition', recognitionRoutes);
   app.use('/api', adminRoutes);
 
   // Vite/Static Setup

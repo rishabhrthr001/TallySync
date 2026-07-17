@@ -9,6 +9,12 @@ const userSchema = new mongoose.Schema({
   gstin: { type: String, default: '' },
   phone: { type: String, default: '' },
   address: { type: String, default: '' },
+  inventorySyncStatus: { type: String, enum: ['idle', 'pending', 'syncing', 'success', 'failed'], default: 'idle' },
+  inventorySyncError: { type: String, default: '' },
+  lastInventorySync: { type: Date, default: null },
+  ledgerSyncStatus: { type: String, enum: ['idle', 'pending', 'syncing', 'success', 'failed'], default: 'idle' },
+  ledgerSyncError: { type: String, default: '' },
+  lastLedgerSync: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

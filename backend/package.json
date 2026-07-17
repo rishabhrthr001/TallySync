@@ -1,5 +1,5 @@
 {
-  "name": "tallysync-backend",
+  "name": "photobill-backend",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,7 +8,10 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@llamaindex/liteparse": "^2.0.8",
     "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.10.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
@@ -16,14 +19,12 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.3.3",
     "multer": "^2.1.1",
-    "pdf-parse": "^2.4.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/multer": "^2.1.0",
     "@types/node": "^22.14.0",
-    "@types/pdf-parse": "^1.1.5",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^5.4.21"

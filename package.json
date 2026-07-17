@@ -1,5 +1,5 @@
 {
-  "name": "tallysync-root",
+  "name": "photobill-root",
   "private": true,
   "scripts": {
     "install:all": "npm install --prefix frontend && npm install --prefix backend",
