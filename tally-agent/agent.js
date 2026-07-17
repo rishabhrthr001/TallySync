@@ -105,6 +105,15 @@ function unescapeXML(str) {
         .replace(/&apos;/g, "'");
 }
 
+function cleanTallyName(name) {
+    if (!name) return '';
+    return name
+        .replace(/^(?:<NAME>|&lt;NAME&gt;)+/gi, '')
+        .replace(/(?:<\/NAME>|&lt;\/NAME&gt;)+$/gi, '')
+        .trim();
+}
+
+
 function getUOMForStockItem(stockItemData, resolvedName) {
     if (!stockItemData || !resolvedName) return 'Nos';
     try {
@@ -917,7 +926,7 @@ async function syncEntry(entry) {
 function parseStockItemsFromXml(xml) {
     const items = [];
     if (!xml) return items;
-    const blocks = xml.split(/<STOCKITEM/gi);
+    const blocks = xml.split(/<STOCKITEM\b/gi);
     for (let i = 1; i < blocks.length; i++) {
         const block = blocks[i];
         // Try NAME attribute first (e.g. NAME="Item"), then strict <NAME> child element
@@ -926,13 +935,13 @@ function parseStockItemsFromXml(xml) {
         const nameTagMatch  = block.match(/<NAME>([\s\S]*?)<\/NAME>/i);
         const rawName = nameAttrMatch ? nameAttrMatch[1] : (nameTagMatch ? nameTagMatch[1] : null);
         if (!rawName) continue;
-        const name = unescapeXML(rawName.trim());
+        const name = cleanTallyName(unescapeXML(rawName.trim()));
         if (!name) continue;
 
-        const uomMatch = block.match(/<BASEUNITS>([\s\S]*?)<\/BASEUNITS>/i);
+        const uomMatch = block.match(/<BASEUNITS[^>]*>([\s\S]*?)<\/BASEUNITS>/i);
         const uom = uomMatch ? unescapeXML(uomMatch[1].trim()) : 'Nos';
         
-        const balMatch = block.match(/<CLOSINGBALANCE>([\s\S]*?)<\/CLOSINGBALANCE>/i);
+        const balMatch = block.match(/<CLOSINGBALANCE[^>]*>([\s\S]*?)<\/CLOSINGBALANCE>/i);
         let stock = 0;
         if (balMatch) {
             const rawBal = unescapeXML(balMatch[1].trim());
@@ -950,19 +959,41 @@ function parseStockItemsFromXml(xml) {
 
         // Try rate fields in priority order: last sale → standard selling → standard costing → last purchase → opening rate
         const rateCandidates = [
-            block.match(/<LASTSALEPRICE>([\s\S]*?)<\/LASTSALEPRICE>/i),
-            block.match(/<STANDARDSELLINGRATE>([\s\S]*?)<\/STANDARDSELLINGRATE>/i),
-            block.match(/<STANDARDPRICE>([\s\S]*?)<\/STANDARDPRICE>/i),
-            block.match(/<LASTPURCHASECOST>([\s\S]*?)<\/LASTPURCHASECOST>/i),
-            block.match(/<STANDARDCOSTINGRATE>([\s\S]*?)<\/STANDARDCOSTINGRATE>/i),
-            block.match(/<OPENINGRATE>([\s\S]*?)<\/OPENINGRATE>/i),
+            block.match(/<LASTSALEPRICE[^>]*>([\s\S]*?)<\/LASTSALEPRICE>/i),
+            block.match(/<STANDARDSELLINGRATE[^>]*>([\s\S]*?)<\/STANDARDSELLINGRATE>/i),
+            block.match(/<STANDARDPRICE[^>]*>([\s\S]*?)<\/STANDARDPRICE>/i),
+            block.match(/<LASTPURCHASECOST[^>]*>([\s\S]*?)<\/LASTPURCHASECOST>/i),
+            block.match(/<STANDARDCOSTINGRATE[^>]*>([\s\S]*?)<\/STANDARDCOSTINGRATE>/i),
+            block.match(/<OPENINGRATE[^>]*>([\s\S]*?)<\/OPENINGRATE>/i),
         ];
         let rate = 0;
         for (const m of rateCandidates) {
             if (m) { const r = extractRate(m[1]); if (r > 0) { rate = r; break; } }
         }
 
-        items.push({ name, uom, stock, rate });
+        // Parse GST from GSTDETAILS.LIST if present
+        let gst = 18; // Default fallback to 18% as in backend schema
+        const gstDetailsMatch = block.match(/<GSTDETAILS.LIST[^>]*>([\s\S]*?)<\/GSTDETAILS.LIST>/i);
+        if (gstDetailsMatch) {
+            const gstBlock = gstDetailsMatch[1];
+            // Find RATEDETAILS.LIST that contains IGST
+            const rateDetailsBlocks = gstBlock.split(/<RATEDETAILS.LIST[^>]*>/gi);
+            for (let j = 1; j < rateDetailsBlocks.length; j++) {
+                const rateBlock = rateDetailsBlocks[j];
+                if (rateBlock.toLowerCase().includes('igst')) {
+                    const rateValMatch = rateBlock.match(/<GSTRATE[^>]*>([\s\S]*?)<\/GSTRATE>/i);
+                    if (rateValMatch) {
+                        const parsedGst = parseFloat(rateValMatch[1].trim());
+                        if (!isNaN(parsedGst) && parsedGst > 0) {
+                            gst = parsedGst;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        items.push({ name, uom, unit: uom, stock, rate, gst });
     }
     return items;
 }
@@ -970,7 +1001,7 @@ function parseStockItemsFromXml(xml) {
 function parseLedgersFromXml(xml) {
     const ledgers = [];
     if (!xml) return ledgers;
-    const blocks = xml.split(/<LEDGER/gi);
+    const blocks = xml.split(/<LEDGER\b/gi);
     for (let i = 1; i < blocks.length; i++) {
         const block = blocks[i];
         // Try NAME attribute first (e.g. NAME="Party"), then strict <NAME> child element
@@ -979,12 +1010,12 @@ function parseLedgersFromXml(xml) {
         const nameTagMatch  = block.match(/<NAME>([\s\S]*?)<\/NAME>/i);
         const rawName = nameAttrMatch ? nameAttrMatch[1] : (nameTagMatch ? nameTagMatch[1] : null);
         if (!rawName) continue;
-        const partyName = unescapeXML(rawName.trim());
+        const partyName = cleanTallyName(unescapeXML(rawName.trim()));
         if (!partyName) continue;
 
-        const parentMatch = block.match(/<PARENT>([\s\S]*?)<\/PARENT>/i);
+        const parentMatch = block.match(/<PARENT[^>]*>([\s\S]*?)<\/PARENT>/i);
         const parent = parentMatch ? unescapeXML(parentMatch[1].trim()) : '';
-        const gstinMatch = block.match(/<PARTYGSTIN>([\s\S]*?)<\/PARTYGSTIN>/i);
+        const gstinMatch = block.match(/<PARTYGSTIN[^>]*>([\s\S]*?)<\/PARTYGSTIN>/i);
         const gstin = gstinMatch ? unescapeXML(gstinMatch[1].trim()) : '';
 
         ledgers.push({ partyName, parent, gstin });

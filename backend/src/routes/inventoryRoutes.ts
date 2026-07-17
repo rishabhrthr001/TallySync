@@ -181,7 +181,7 @@ router.post('/sync-complete', authenticateToken, async (req: any, res) => {
 
     // Upsert items in the database
     for (const itemData of items) {
-      const { name, unit, stock, rate } = itemData;
+      const { name, unit, stock, rate, gst } = itemData;
       if (!name) continue;
 
       const derivedStatus = stock > 0 ? 'In Stock' : 'Out of Stock';
@@ -196,12 +196,12 @@ router.post('/sync-complete', authenticateToken, async (req: any, res) => {
             unit: unit || 'pcs',
             stock: Number(stock) || 0,
             rate: Number(rate) || 0,
+            gst: (gst !== undefined && gst !== null) ? Number(gst) : 18,
             status: derivedStatus,
             updatedAt: new Date()
           },
           $setOnInsert: {
             category: 'General',
-            gst: 18,
             sku: '',
             images: []
           }
