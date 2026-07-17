@@ -242,4 +242,14 @@ router.post('/sync-fail', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Clear all inventory items for the authenticated user's company
+router.delete('/clear', authenticateToken, async (req: any, res) => {
+  try {
+    const result = await Item.deleteMany({ companyName: req.user.companyName });
+    res.json({ success: true, deleted: result.deletedCount, message: `Cleared ${result.deletedCount} inventory items.` });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

@@ -154,4 +154,18 @@ router.post('/sync-fail', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Clear all ledgers for the authenticated user's company and reset sync status
+router.delete('/clear', authenticateToken, async (req: any, res) => {
+  try {
+    const result = await Ledger.deleteMany({ companyName: req.user.companyName });
+    await User.findOneAndUpdate(
+      { companyName: req.user.companyName },
+      { ledgerSyncStatus: 'idle', ledgerSyncError: '', lastLedgerSync: null }
+    );
+    res.json({ success: true, deleted: result.deletedCount, message: `Cleared ${result.deletedCount} ledgers.` });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

@@ -79,6 +79,20 @@ const Ledgers: React.FC = () => {
     }
   };
 
+  const handleClearLedgers = async () => {
+    if (!window.confirm('Clear ALL party ledgers? This cannot be undone. You can re-sync from Tally afterwards.')) return;
+    try {
+      const res = await axios.delete('/api/ledger/clear', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      showToast(res.data.message || 'Ledgers cleared.', 'success');
+      setSyncStatus('idle');
+      fetchLedgers();
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to clear ledgers.', 'error');
+    }
+  };
+
   // Poll sync status when status is pending or syncing
   useEffect(() => {
     let intervalId: any;
@@ -212,6 +226,15 @@ const Ledgers: React.FC = () => {
               : syncStatus === 'failed'
               ? 'Sync Failed (Retry)'
               : 'Sync Tally'}
+          </button>
+
+          <button
+            onClick={handleClearLedgers}
+            className="flex items-center justify-center gap-2 px-5 py-3.5 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold uppercase tracking-wider rounded-2xl transition-all w-full sm:w-auto cursor-pointer shadow-sm"
+            title="Clear all synced ledgers"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            Clear All
           </button>
 
           <button 
