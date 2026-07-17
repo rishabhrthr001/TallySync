@@ -320,24 +320,27 @@ const CreateEntry: React.FC = () => {
                 />
                 {partyDropdownOpen && (
                   <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl max-h-60 overflow-y-auto overflow-x-hidden">
-                    {[{name: 'Cash'}, ...existingParties]
-                      .filter(p => (p.name || '').toLowerCase().includes((partyName || '').toLowerCase()))
-                      .map((p, i) => (
-                      <button
-                        type="button"
-                        key={i}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          setPartyName(p.name);
-                          setPartyDropdownOpen(false);
-                          if (p.gstin) setPartyGstin(p.gstin);
-                        }}
-                        className="w-full text-left px-4 py-3 hover:bg-indigo-50 transition-colors border-b border-slate-50 last:border-0"
-                      >
-                        <span className="font-bold text-slate-700">{p.name}</span>
-                        {p.gstin && <span className="block text-[10px] font-mono text-slate-400 mt-0.5">{p.gstin}</span>}
-                      </button>
-                    ))}
+                    {[{partyName: 'Cash', gstin: ''}, ...existingParties]
+                      .filter(p => (p.partyName || p.name || '').toLowerCase().includes((partyName || '').toLowerCase()))
+                      .map((p, i) => {
+                        const nameVal = p.partyName || p.name || '';
+                        return (
+                          <button
+                            type="button"
+                            key={i}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setPartyName(nameVal);
+                              setPartyDropdownOpen(false);
+                              if (p.gstin) setPartyGstin(p.gstin);
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-indigo-50 transition-colors border-b border-slate-50 last:border-0"
+                          >
+                            <span className="font-bold text-slate-700">{nameVal}</span>
+                            {p.gstin && <span className="block text-[10px] font-mono text-slate-400 mt-0.5">{p.gstin}</span>}
+                          </button>
+                        );
+                      })}
                   </div>
                 )}
               </div>
@@ -693,7 +696,7 @@ const CreateEntry: React.FC = () => {
                     list="party-list"
                     onChange={(e) => {
                       const val = e.target.value;
-                      const matched = existingParties.find(p => p.name.toLowerCase() === val.toLowerCase());
+                      const matched = existingParties.find(p => (p.partyName || p.name || '').toLowerCase() === val.toLowerCase());
                       setReviewData({
                         ...reviewData,
                         partyName: val,
@@ -958,7 +961,7 @@ const CreateEntry: React.FC = () => {
       {/* Datalist for party names */}
       <datalist id="party-list">
         {existingParties.map((p, idx) => (
-          <option key={idx} value={p.name} />
+          <option key={idx} value={p.partyName || p.name || ''} />
         ))}
       </datalist>
 
