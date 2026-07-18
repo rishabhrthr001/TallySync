@@ -10,6 +10,7 @@ const CONFIG = {
     PASSWORD: process.env.AGENT_PASSWORD || 'pankaj@9999',
     POLL_INTERVAL: 10000,
     RETRY_DELAY: 5000,
+    FORCE_EDUCATIONAL_DATES: process.env.FORCE_EDUCATIONAL_DATES === 'true' || false, // Set to true if using unlicensed Tally (Educational Mode) which only allows 1st, 2nd, and 31st
 };
 
 let AUTH_TOKEN = null;
@@ -31,7 +32,7 @@ function escapeXML(str) {
  * Tally Educational Mode only allows 1st, 2nd, and 31st of any month.
  * We use the 1st to be universally safe.
  */
-function toTallyDate(dateStr) {
+function toTallyDate(dateStr, forceFirstOfMonth = false) {
     const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     let d;
     try {
@@ -40,8 +41,15 @@ function toTallyDate(dateStr) {
     } catch (e) {
         d = new Date();
     }
-    // Force day=01 for Educational Mode compatibility
-    return `01-${MONTHS[d.getMonth()]}-${d.getFullYear()}`;
+    
+    if (CONFIG.FORCE_EDUCATIONAL_DATES || forceFirstOfMonth) {
+        // Force day=01 for Educational Mode compatibility
+        return `01-${MONTHS[d.getMonth()]}-${d.getFullYear()}`;
+    }
+
+    // Use the actual day of the month (Educational Mode previously forced '01')
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${day}-${MONTHS[d.getMonth()]}-${d.getFullYear()}`;
 }
 
 const STATE_CODES = {
@@ -425,10 +433,14 @@ function fmtQty(qty, unit = 'Nos') {
     return `${Number.isInteger(n) ? n : n.toFixed(2)} ${unit}`;
 }
 
-function buildEnvelope(entry, voucherType, dateStr, bodyXml, objView = '') {
-    const narration = entry.items && entry.items.length > 0
+function buildEnvelope(entry, voucherType, dateStr, bodyXml, objView = '', forcedDate = false) {
+    let narration = entry.items && entry.items.length > 0
         ? `${voucherType} ${entry.invoiceNumber}: ${entry.items.map(i => `${i.name} x${i.quantity}`).join(', ')} — via TallySync`
         : `${voucherType} ${entry.invoiceNumber} — via TallySync`;
+
+    if (forcedDate) {
+        narration += ` (Original Date: ${entry.date} adjusted to 1st of month for Educational Mode compatibility)`;
+    }
 
     const objViewAttr = objView ? ` OBJVIEW="${objView}"` : '';
 
@@ -472,10 +484,10 @@ function buildEnvelope(entry, voucherType, dateStr, bodyXml, objView = '') {
  *   Purchase: Party Cr (DEEMED=NO, AMT=negative), Stock Dr (DEEMED=YES, AMT=negative),
  *             Expense Dr (via ACCOUNTINGALLOCATIONS), GST Dr (DEEMED=YES, AMT=negative)
  */
-function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers) {
+function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers, forceFirstOfMonth = false) {
     const isSales    = entry.type === 'sales';
     const voucherType = isSales ? 'Sales' : 'Purchase';
-    const dateStr    = toTallyDate(entry.date);
+    const dateStr    = toTallyDate(entry.date, forceFirstOfMonth);
 
     // Sign rules (Tally XML standard): Debit = Negative, Credit = Positive
     const partyAmtValue = isSales
@@ -534,7 +546,7 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers)
                         ${inventoryLines}
                         ${taxLines}`;
 
-    return buildEnvelope(entry, voucherType, dateStr, body, 'Invoice Voucher View');
+    return buildEnvelope(entry, voucherType, dateStr, body, 'Invoice Voucher View', forceFirstOfMonth);
 }
 
 /**
@@ -542,10 +554,10 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers)
  * Used when inventory voucher fails (e.g. Tally voucher type not set to "Use for Invoice").
  * Financial totals are correct; stock movement must be updated in Tally manually.
  */
-function generateAccountingVoucherXML(entry, partyName, incomeLedger, taxLedgers) {
+function generateAccountingVoucherXML(entry, partyName, incomeLedger, taxLedgers, forceFirstOfMonth = false) {
     const isSales     = entry.type === 'sales';
     const voucherType = isSales ? 'Sales' : 'Purchase';
-    const dateStr     = toTallyDate(entry.date);
+    const dateStr     = toTallyDate(entry.date, forceFirstOfMonth);
 
     // Sign rules (Tally XML standard): Debit = Negative, Credit = Positive
     const partyAmtValue = isSales
@@ -583,7 +595,7 @@ function generateAccountingVoucherXML(entry, partyName, incomeLedger, taxLedgers
                         </LEDGERENTRIES.LIST>
                         ${taxLines}`;
 
-    return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View');
+    return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth);
 }
 
 /**
@@ -600,9 +612,9 @@ function generateAccountingVoucherXML(entry, partyName, incomeLedger, taxLedgers
  * 
  * BETTER APPROACH: Use a simple OUT-only structure with godown.
  */
-function generateStockJournalXML(entry) {
+function generateStockJournalXML(entry, forceFirstOfMonth = false) {
     const isSales = entry.type === 'sales';
-    const dateStr = toTallyDate(entry.date);
+    const dateStr = toTallyDate(entry.date, forceFirstOfMonth);
     
     const stockLines = (entry.items || []).map(item => {
         const qty = fmtQty(item.quantity);
@@ -634,7 +646,10 @@ function generateStockJournalXML(entry) {
         }
     }).join('');
 
-    const narration = `Stock ${isSales ? 'out' : 'in'} for ${entry.invoiceNumber} via TallySync`;
+    let narration = `Stock ${isSales ? 'out' : 'in'} for ${entry.invoiceNumber} via TallySync`;
+    if (forceFirstOfMonth) {
+        narration += ` (Original Date: ${entry.date} adjusted for Educational Mode)`;
+    }
 
     return `<ENVELOPE>
     <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
@@ -857,17 +872,26 @@ async function syncEntry(entry) {
         const isOk = (r) => r.includes('<CREATED>1</CREATED>') || r.includes('<ALTERED>1</ALTERED>');
 
         let voucherCreated = false;
+        let forcedDate = false;
 
         // Step 5a: Try INVENTORY VOUCHER first (detailed bill with per-item lines)
         if (entry.items && entry.items.length > 0) {
             console.log(`\n[VOUCHER] Attempting detailed inventory voucher for ${entry.invoiceNumber}...`);
             const invXml = generateInventoryVoucherXML(entry, partyResolved, incomeResolved, taxLedgers);
             console.log(`[DEBUG XML]\n${invXml}`);
-            const invResponse = await tallyRequest(invXml);
+            let invResponse = await tallyRequest(invXml);
             console.log(`[DEBUG RESPONSE]\n${invResponse}`);
 
+            if (invResponse.includes('Voucher date is missing')) {
+                console.warn(`[VOUCHER] ⚠️  Tally date error detected. Likely Educational Mode restriction. Retrying with 1st of the month...`);
+                const retryXml = generateInventoryVoucherXML(entry, partyResolved, incomeResolved, taxLedgers, true);
+                invResponse = await tallyRequest(retryXml);
+                console.log(`[DEBUG RESPONSE RETRY]\n${invResponse}`);
+                forcedDate = true;
+            }
+
             if (isOk(invResponse)) {
-                console.log(`[VOUCHER] ✅ Detailed inventory voucher created for ${entry.invoiceNumber}`);
+                console.log(`[VOUCHER] ✅ Detailed inventory voucher created for ${entry.invoiceNumber}${forcedDate ? ' (Forced 1st of month)' : ''}`);
                 console.log(`[VOUCHER]    → Item details & stock movement recorded in one voucher.`);
                 voucherCreated = true;
                 // No separate Stock Journal needed — inventory voucher handles stock natively
@@ -882,10 +906,18 @@ async function syncEntry(entry) {
         // Step 5b: Fallback — ACCOUNTING VOUCHER (no item details, just totals)
         if (!voucherCreated) {
             console.log(`\n[VOUCHER] Creating accounting-only entry for ${entry.invoiceNumber}...`);
-            const accXml = generateAccountingVoucherXML(entry, partyResolved, incomeResolved, taxLedgers);
+            const accXml = generateAccountingVoucherXML(entry, partyResolved, incomeResolved, taxLedgers, forcedDate);
             console.log(`[DEBUG XML]\n${accXml}`);
-            const accResponse = await tallyRequest(accXml);
+            let accResponse = await tallyRequest(accXml);
             console.log(`[DEBUG RESPONSE]\n${accResponse}`);
+
+            if (!forcedDate && accResponse.includes('Voucher date is missing')) {
+                console.warn(`[VOUCHER] ⚠️  Tally date error detected on accounting fallback. Retrying with 1st of the month...`);
+                const retryXml = generateAccountingVoucherXML(entry, partyResolved, incomeResolved, taxLedgers, true);
+                accResponse = await tallyRequest(retryXml);
+                console.log(`[DEBUG RESPONSE RETRY]\n${accResponse}`);
+                forcedDate = true;
+            }
 
             if (!isOk(accResponse)) {
                 const errMatch = accResponse.match(/<LINEERROR>(.*?)<\/LINEERROR>/is)
@@ -898,12 +930,12 @@ async function syncEntry(entry) {
                 await updateBackendStatus(entry._id, 'failed', errMsg);
                 return;
             }
-            console.log(`[VOUCHER] ✅ Accounting entry created for ${entry.invoiceNumber}`);
+            console.log(`[VOUCHER] ✅ Accounting entry created for ${entry.invoiceNumber}${forcedDate ? ' (Forced 1st of month)' : ''}`);
 
             // Step 5c: Stock Journal ONLY when accounting-only fallback was used
             if (entry.items && entry.items.length > 0) {
                 console.log(`[STOCK] Creating Stock Journal for ${entry.invoiceNumber}...`);
-                const sjXml = generateStockJournalXML(entry);
+                const sjXml = generateStockJournalXML(entry, forcedDate);
                 const sjResponse = await tallyRequest(sjXml);
 
                 if (isOk(sjResponse)) {

@@ -1,6 +1,7 @@
 import express from 'express';
 import Ledger from '../models/Ledger.js';
 import User from '../models/User.js';
+import Voucher from '../models/Voucher.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -154,15 +155,77 @@ router.post('/sync-fail', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Sync Complete: Agent uploads ledgers/parties and marks sync as successful (Admin/Agent only)
 // Clear all ledgers for the authenticated user's company and reset sync status
 router.delete('/clear', authenticateToken, async (req: any, res) => {
   try {
     const result = await Ledger.deleteMany({ companyName: req.user.companyName });
+    await Voucher.deleteMany({ companyName: req.user.companyName });
     await User.findOneAndUpdate(
       { companyName: req.user.companyName },
       { ledgerSyncStatus: 'idle', ledgerSyncError: '', lastLedgerSync: null }
     );
-    res.json({ success: true, deleted: result.deletedCount, message: `Cleared ${result.deletedCount} ledgers.` });
+    res.json({ success: true, deleted: result.deletedCount, message: `Cleared ${result.deletedCount} ledgers and statements.` });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Sync Vouchers: Agent uploads transactions list for a company (Admin/Agent only)
+router.post('/sync-transactions', authenticateToken, async (req: any, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { companyName, transactions } = req.body;
+    if (!companyName) {
+      return res.status(400).json({ error: 'companyName is required' });
+    }
+    if (!Array.isArray(transactions)) {
+      return res.status(400).json({ error: 'transactions array is required' });
+    }
+
+    const clientUser = await User.findOne({ companyName, role: 'client' });
+    const targetUserId = clientUser ? clientUser._id : req.user.id;
+
+    for (const txn of transactions) {
+      const { partyName, voucherNumber, voucherType, date, amount, narration, reference, guid } = txn;
+      if (!partyName || !guid) continue;
+
+      await Voucher.findOneAndUpdate(
+        { guid },
+        {
+          $set: {
+            userId: targetUserId,
+            companyName,
+            partyName: partyName.trim(),
+            voucherNumber: String(voucherNumber).trim(),
+            voucherType: String(voucherType).trim(),
+            date: String(date).trim(),
+            amount: Number(amount) || 0,
+            narration: narration ? String(narration).trim() : '',
+            reference: reference ? String(reference).trim() : '',
+            updatedAt: new Date()
+          }
+        },
+        { upsert: true, new: true }
+      );
+    }
+
+    res.json({ success: true, message: `Successfully synchronized ${transactions.length} vouchers.` });
+  } catch (error: any) {
+    console.error('Voucher sync-transactions error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET Statement of Vouchers for a ledger
+router.get('/:partyName/transactions', authenticateToken, async (req: any, res) => {
+  try {
+    const companyName = req.user.companyName;
+    const { partyName } = req.params;
+    const vouchers = await Voucher.find({ companyName, partyName }).sort({ date: 1, voucherNumber: 1 });
+    res.json(vouchers);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
