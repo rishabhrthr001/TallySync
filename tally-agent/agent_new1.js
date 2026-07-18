@@ -1093,6 +1093,7 @@ async function syncTallyInventoryAndParties(companyName, taskId) {
             headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
         });
         console.log(`[SYNC-TD] ✅ Data synced successfully to website!`);
+        await syncTallyTransactions(companyName);
     } catch (e) {
         console.error(`[SYNC-TD] ❌ Failed: ${e.message}`);
         throw e;
@@ -1102,7 +1103,7 @@ async function syncTallyInventoryAndParties(companyName, taskId) {
 // ─── TRANSACTION SYNC ───────────────────────────────────────────────────────
 
 function escapeRegExp(string) {
-    return string.replace(/[.*+?^$/{}().|[\]+]/g, '\async function checkPendingInventorySyncs() {');
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function parseVouchersFromXml(xml) {
@@ -1305,6 +1306,7 @@ async function checkPendingLedgerSyncs() {
                     headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
                 });
                 console.log(`[SYNC-LEDG] ✅ Ledger sync complete!`);
+                await syncTallyTransactions(resolvedName);
             } catch (e) {
                 console.error(`[SYNC-LEDG] ❌ Failed: ${e.message}`);
                 try {
