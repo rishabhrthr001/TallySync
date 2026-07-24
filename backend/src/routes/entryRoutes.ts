@@ -169,6 +169,15 @@ async function parseAndExtractInvoice(
     });
   }
 
+  // Intrastate vs Interstate GST check
+  let finalGstType: 'cgst-sgst' | 'igst' = data.gstType || 'cgst-sgst';
+  if (data.partyGstin && data.partyGstin.length >= 2) {
+    const pState = data.partyGstin.substring(0, 2);
+    if (pState === '08' || pState === '27') {
+      finalGstType = 'cgst-sgst';
+    }
+  }
+
   return {
     extractedEntry: {
       type: docType, 
@@ -180,7 +189,7 @@ async function parseAndExtractInvoice(
       taxableAmount: data.taxableAmount || 0,
       taxAmount: data.taxAmount || 0,
       totalAmount: data.totalAmount || 0,
-      gstType: data.gstType || 'cgst-sgst',
+      gstType: finalGstType,
       notes: data.notes || `Automatically parsed ${docType} bill using Gemini 1.5 Pro`
     }
   };

@@ -62,12 +62,12 @@ const CreateEntry: React.FC = () => {
 
   useEffect(() => {
     const trimmed = partyGstin.trim();
-    if (trimmed.length === 15) {
+    if (trimmed.length >= 2) {
       const stateCode = trimmed.substring(0, 2);
-      if (stateCode !== '27') { // 27 is Maharashtra
-        setGstType('igst');
-      } else {
+      if (stateCode === '08' || stateCode === '27') { // 08 is Rajasthan, 27 is Maharashtra
         setGstType('cgst-sgst');
+      } else {
+        setGstType('igst');
       }
     }
   }, [partyGstin]);

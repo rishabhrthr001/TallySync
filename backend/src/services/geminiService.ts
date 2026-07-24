@@ -220,7 +220,11 @@ ITEM EXTRACTION INSTRUCTIONS:
 
 GENERAL INSTRUCTIONS:
 - Format date as YYYY-MM-DD.
-- If party GSTIN is present and does not start with state code '27', set gstType to 'igst'. Otherwise, default to 'cgst-sgst'.`;
+- Determine gstType ("cgst-sgst" vs "igst"):
+  * Compare the first 2 digits (state code) of the Supplier GSTIN and Buyer GSTIN.
+  * If both GSTINs share the SAME 2-digit state code (e.g. both '08' for Rajasthan or both '27' for Maharashtra), set gstType to 'cgst-sgst'.
+  * If Supplier and Buyer have DIFFERENT 2-digit state codes (e.g. '08' vs '27'), set gstType to 'igst'.
+  * Default to 'cgst-sgst' for intrastate bills.`;
 
     const result = await model.generateContent({
       contents: [
