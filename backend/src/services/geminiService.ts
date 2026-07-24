@@ -212,10 +212,11 @@ ITEM EXTRACTION INSTRUCTIONS:
   * STRIP OUT: leading serial numbers or index prefixes like "1-", "2.", batch metadata lines (e.g. "Batch : Primary Batch", "Batch No", "Exp Date"), serial numbers, and table formatting artifacts.
   * PRESERVE: product variants, brand, weight/pack size (e.g. "UREA NEEM IFFCO 45 KG" or "DAP IFFCO 50 KG").
   * CRITICAL FOR METRIC TON (MT) & BAGS QUANTITY PARSING:
-    - In fertilizer / agricultural invoices, the main quantity column might be listed in MT (Metric Tons), followed by the bag count in parentheses (e.g., "105.70 MT (2114 Bags)" or "(2114 Bags)").
-    - ALWAYS EXTRACT THE BAG COUNT (e.g. 2114) as the numerical "quantity" and "BAGS" (or "BAG") as the "unit".
-    - Calculate the unit "rate" per bag as (line taxable amount / bag quantity), so that (quantity * rate) EXACTLY matches the line total in the PDF.
-  * Extract HSN code, Quantity (in Bags if specified), Unit (e.g., BAGS, PCS, KG), Rate per unit/bag, Line Taxable Amount, GST%, CGST, SGST, and IGST if visible.
+    - Fertilizer / agricultural invoices often show Metric Tons (MT) in the main table quantity column (e.g. "95.13 MT", "95.130", "105.70 MT"), but list the BAG count inside parentheses or in the Item Description column (e.g., "UREA NEEM IFFCO 45 KG (2140 Bags)", "(2140 BAGS)", "2140 Bags").
+    - YOU MUST SEARCH THE ITEM DESCRIPTION AND SURROUNDING TEXT FOR BAG COUNTS (e.g. "(2140 Bags)" or "2140 BAGS").
+    - ALWAYS OVERRIDE the MT decimal quantity (like 95.13) AND EXTRACT THE BAG COUNT (e.g. 2140) as the numerical "quantity" and "BAGS" as the "unit".
+    - Calculate the unit "rate" per bag as (line taxable amount / bag quantity), so that (quantity * rate) EXACTLY matches the total line amount in the PDF.
+  * Extract HSN code, Quantity (in Bags if specified in description), Unit (e.g., BAGS, PCS, KG), Rate per bag, Line Taxable Amount, GST%, CGST, SGST, and IGST if visible.
 
 GENERAL INSTRUCTIONS:
 - Format date as YYYY-MM-DD.

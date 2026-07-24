@@ -96,12 +96,31 @@ async function parseAndExtractInvoice(
 
   // Format and fuzzy match items
   const items = (data.items || []).map(i => {
-    const rawName = i.name || 'Extracted Item';
-    const matchResult = findBestInventoryMatch(rawName, inventoryList);
-
-    const quantity = Number(i.quantity) || 1;
+    let rawName = i.name || 'Extracted Item';
+    let quantity = Number(i.quantity) || 1;
     let lineAmount = Number(i.amount) || 0;
     let rate = Number(i.rate) || 0;
+    let unit = i.unit || 'BAGS';
+
+    // Regex check for bag counts in rawName (e.g. "(2140 Bags)", "2140 BAGS")
+    const bagMatch = rawName.match(/\b(\d{2,6})\s*bags?\b/i) || rawName.match(/\(\s*(\d{2,6})\s*(?:bags?)?\s*\)/i);
+    if (bagMatch && bagMatch[1]) {
+      const parsedBags = parseInt(bagMatch[1], 10);
+      if (parsedBags > 10 && parsedBags !== quantity) {
+        quantity = parsedBags;
+        unit = 'BAGS';
+        if (lineAmount > 0) {
+          rate = Number((lineAmount / quantity).toFixed(2));
+        }
+      }
+      // Strip "(2140 Bags)" from rawName so fuzzy matching operates on clean item text
+      rawName = rawName
+        .replace(/\(\s*\d{2,6}\s*(?:bags?)?\s*\)/gi, '')
+        .replace(/\b\d{2,6}\s*bags?\b/gi, '')
+        .trim();
+    }
+
+    const matchResult = findBestInventoryMatch(rawName, inventoryList);
 
     // If rate * quantity does not equal lineAmount (e.g. rate was given per Metric Ton instead of per Bag), recalculate rate per bag
     if (lineAmount > 0 && quantity > 0) {
@@ -118,7 +137,7 @@ async function parseAndExtractInvoice(
       originalExtractedName: rawName,
       hsn: i.hsn || '',
       quantity,
-      unit: matchResult?.item?.unit || i.unit || 'BAGS',
+      unit: matchResult?.item?.unit || unit || 'BAGS',
       rate: rate || matchResult?.item?.rate || 0,
       amount: lineAmount,
       gst: Number(i.gst) || matchResult?.item?.gst || 18,
