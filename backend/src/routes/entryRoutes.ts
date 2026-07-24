@@ -99,14 +99,28 @@ async function parseAndExtractInvoice(
     const rawName = i.name || 'Extracted Item';
     const matchResult = findBestInventoryMatch(rawName, inventoryList);
 
+    const quantity = Number(i.quantity) || 1;
+    let lineAmount = Number(i.amount) || 0;
+    let rate = Number(i.rate) || 0;
+
+    // If rate * quantity does not equal lineAmount (e.g. rate was given per Metric Ton instead of per Bag), recalculate rate per bag
+    if (lineAmount > 0 && quantity > 0) {
+      const calcAmount = quantity * rate;
+      if (rate === 0 || Math.abs(calcAmount - lineAmount) > 5) {
+        rate = Number((lineAmount / quantity).toFixed(2));
+      }
+    } else if (rate > 0 && quantity > 0 && lineAmount === 0) {
+      lineAmount = Number((quantity * rate).toFixed(2));
+    }
+
     return {
       name: matchResult ? matchResult.item.name : rawName,
       originalExtractedName: rawName,
       hsn: i.hsn || '',
-      quantity: Number(i.quantity) || 1,
-      unit: matchResult?.item?.unit || i.unit || 'pcs',
-      rate: Number(i.rate) || matchResult?.item?.rate || 0,
-      amount: Number(i.amount) || Number(((Number(i.quantity) || 1) * (Number(i.rate) || 0)).toFixed(2)),
+      quantity,
+      unit: matchResult?.item?.unit || i.unit || 'BAGS',
+      rate: rate || matchResult?.item?.rate || 0,
+      amount: lineAmount,
       gst: Number(i.gst) || matchResult?.item?.gst || 18,
       cgst: Number(i.cgst) || 0,
       sgst: Number(i.sgst) || 0,

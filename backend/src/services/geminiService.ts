@@ -211,7 +211,11 @@ ITEM EXTRACTION INSTRUCTIONS:
   * Extract a CLEAN, INTELLIGENT item name.
   * STRIP OUT: leading serial numbers or index prefixes like "1-", "2.", batch metadata lines (e.g. "Batch : Primary Batch", "Batch No", "Exp Date"), serial numbers, and table formatting artifacts.
   * PRESERVE: product variants, brand, weight/pack size (e.g. "UREA NEEM IFFCO 45 KG" or "DAP IFFCO 50 KG").
-  * Extract HSN code, Quantity, Unit (e.g., PCS, BAG, KG), Rate, Line Taxable Amount, GST%, CGST, SGST, and IGST if visible.
+  * CRITICAL FOR METRIC TON (MT) & BAGS QUANTITY PARSING:
+    - In fertilizer / agricultural invoices, the main quantity column might be listed in MT (Metric Tons), followed by the bag count in parentheses (e.g., "105.70 MT (2114 Bags)" or "(2114 Bags)").
+    - ALWAYS EXTRACT THE BAG COUNT (e.g. 2114) as the numerical "quantity" and "BAGS" (or "BAG") as the "unit".
+    - Calculate the unit "rate" per bag as (line taxable amount / bag quantity), so that (quantity * rate) EXACTLY matches the line total in the PDF.
+  * Extract HSN code, Quantity (in Bags if specified), Unit (e.g., BAGS, PCS, KG), Rate per unit/bag, Line Taxable Amount, GST%, CGST, SGST, and IGST if visible.
 
 GENERAL INSTRUCTIONS:
 - Format date as YYYY-MM-DD.
