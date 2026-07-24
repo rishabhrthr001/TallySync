@@ -11,8 +11,73 @@ const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
 
+function normalizeStr(str: string): string {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .replace(/^[0-9]+[\s\.\-]+/, '') // Remove leading numbers like "1-", "2.", "01 "
+    .replace(/(\d+)([a-z]+)/gi, '$1 $2') // Separate numbers and letters e.g. 50kg -> 50 kg
+    .replace(/([a-z]+)(\d+)/gi, '$1 $2')
+    .replace(/[^a-z0-9\s]/g, ' ')     // Replace non-alphanumeric with space
+    .replace(/\s+/g, ' ')            // Collapse extra spaces
+    .trim();
+}
+
+function findBestInventoryMatch(extractedName: string, inventoryList: any[]) {
+  const normExtracted = normalizeStr(extractedName);
+  if (!normExtracted) return null;
+
+  const extractedTokens = new Set(normExtracted.split(' ').filter(t => t.length > 0));
+  let bestItem: any = null;
+  let highestScore = 0;
+
+  for (const dbItem of inventoryList) {
+    const dbName = dbItem.name || '';
+    const normDb = normalizeStr(dbName);
+    if (!normDb) continue;
+
+    // 1. Exact normalized match
+    if (normExtracted === normDb) {
+      return { item: dbItem, confidence: 1.0 };
+    }
+
+    const dbTokens = new Set(normDb.split(' ').filter(t => t.length > 0));
+    
+    // 2. Jaccard token set similarity
+    let intersection = 0;
+    for (const token of dbTokens) {
+      if (extractedTokens.has(token)) intersection++;
+    }
+    const union = new Set([...extractedTokens, ...dbTokens]).size;
+    const jaccardScore = union > 0 ? intersection / union : 0;
+
+    // 3. Containment check score
+    let containmentScore = 0;
+    if (normExtracted.includes(normDb) || normDb.includes(normExtracted)) {
+      containmentScore = 0.85;
+    }
+
+    const finalScore = Math.max(jaccardScore, containmentScore);
+    if (finalScore > highestScore) {
+      highestScore = finalScore;
+      bestItem = dbItem;
+    }
+  }
+
+  if (highestScore >= 0.45 && bestItem) {
+    return { item: bestItem, confidence: Number(highestScore.toFixed(2)) };
+  }
+  return null;
+}
+
 // Shared helper function for document OCR parsing using Gemini
-async function parseAndExtractInvoice(buffer: Buffer, originalname: string, mimetype: string) {
+async function parseAndExtractInvoice(
+  buffer: Buffer, 
+  originalname: string, 
+  mimetype: string, 
+  docType: 'sales' | 'purchase' = 'purchase',
+  companyName?: string
+) {
   let finalMime = mimetype;
   if (!finalMime) {
     if (/\.pdf$/i.test(originalname)) finalMime = 'application/pdf';
@@ -21,28 +86,59 @@ async function parseAndExtractInvoice(buffer: Buffer, originalname: string, mime
     else finalMime = 'application/octet-stream';
   }
 
-  const data = await extractInvoiceDetails(buffer, finalMime);
+  const data = await extractInvoiceDetails(buffer, finalMime, docType);
   
-  // Format items nicely
-  const items = (data.items || []).map(i => ({
-    name: i.name || 'Extracted Item',
-    quantity: Number(i.quantity) || 1,
-    rate: Number(i.rate) || 0,
-    amount: Number(i.amount) || Number(((Number(i.quantity) || 1) * (Number(i.rate) || 0)).toFixed(2))
-  }));
+  // Fetch existing inventory for fuzzy matching
+  let inventoryList: any[] = [];
+  if (companyName) {
+    inventoryList = await Item.find({ companyName });
+  }
+
+  // Format and fuzzy match items
+  const items = (data.items || []).map(i => {
+    const rawName = i.name || 'Extracted Item';
+    const matchResult = findBestInventoryMatch(rawName, inventoryList);
+
+    return {
+      name: matchResult ? matchResult.item.name : rawName,
+      originalExtractedName: rawName,
+      hsn: i.hsn || '',
+      quantity: Number(i.quantity) || 1,
+      unit: matchResult?.item?.unit || i.unit || 'pcs',
+      rate: Number(i.rate) || matchResult?.item?.rate || 0,
+      amount: Number(i.amount) || Number(((Number(i.quantity) || 1) * (Number(i.rate) || 0)).toFixed(2)),
+      gst: Number(i.gst) || matchResult?.item?.gst || 18,
+      cgst: Number(i.cgst) || 0,
+      sgst: Number(i.sgst) || 0,
+      igst: Number(i.igst) || 0,
+      matched: !!matchResult,
+      confidence: matchResult?.confidence || 0,
+      matchedInventoryName: matchResult?.item?.name || null
+    };
+  });
 
   if (items.length === 0) {
     items.push({
       name: 'Extracted Total (Verify in Modal)',
+      originalExtractedName: 'Extracted Total',
+      hsn: '',
       quantity: 1,
+      unit: 'pcs',
       rate: data.taxableAmount || data.totalAmount || 0,
-      amount: data.taxableAmount || data.totalAmount || 0
+      amount: data.taxableAmount || data.totalAmount || 0,
+      gst: 18,
+      cgst: 0,
+      sgst: 0,
+      igst: 0,
+      matched: false,
+      confidence: 0,
+      matchedInventoryName: null
     });
   }
 
   return {
     extractedEntry: {
-      type: 'purchase', 
+      type: docType, 
       partyName: data.partyName || 'Unknown Party',
       partyGstin: data.partyGstin || '',
       invoiceNumber: data.invoiceNumber || `DOC-${Math.floor(Math.random() * 9000) + 1000}`,
@@ -52,7 +148,7 @@ async function parseAndExtractInvoice(buffer: Buffer, originalname: string, mime
       taxAmount: data.taxAmount || 0,
       totalAmount: data.totalAmount || 0,
       gstType: data.gstType || 'cgst-sgst',
-      notes: data.notes || 'Automatically parsed from document using Gemini'
+      notes: data.notes || `Automatically parsed ${docType} bill using Gemini 1.5 Pro`
     }
   };
 }
@@ -63,7 +159,8 @@ router.post('/upload-pdf', authenticateToken, upload.single('pdf'), async (req: 
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
-    const { extractedEntry } = await parseAndExtractInvoice(req.file.buffer, req.file.originalname, req.file.mimetype);
+    const docType: 'sales' | 'purchase' = req.body.docType === 'sales' ? 'sales' : 'purchase';
+    const { extractedEntry } = await parseAndExtractInvoice(req.file.buffer, req.file.originalname, req.file.mimetype, docType, req.user.companyName);
     res.json({ success: true, data: extractedEntry }); 
   } catch (error: any) {
     console.error('PDF parsing error DETAIL:', error);
@@ -78,7 +175,8 @@ router.post('/upload-document', authenticateToken, upload.any(), async (req: any
     if (!file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
-    const { extractedEntry } = await parseAndExtractInvoice(file.buffer, file.originalname, file.mimetype);
+    const docType: 'sales' | 'purchase' = req.body.docType === 'sales' ? 'sales' : 'purchase';
+    const { extractedEntry } = await parseAndExtractInvoice(file.buffer, file.originalname, file.mimetype, docType, req.user.companyName);
     res.json({ success: true, data: extractedEntry }); 
   } catch (error: any) {
     console.error('Document parsing error DETAIL:', error);

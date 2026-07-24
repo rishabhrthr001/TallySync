@@ -72,10 +72,11 @@ const CreateEntry: React.FC = () => {
     }
   }, [partyGstin]);
 
-  const processDocumentUpload = async (file: File) => {
+  const processDocumentUpload = async (file: File, docType: 'sales' | 'purchase') => {
     setUploadingPdf(true);
     const formData = new FormData();
     formData.append('document', file);
+    formData.append('docType', docType);
 
     try {
       const response = await axios.post('/api/entries/upload-document', formData, {
@@ -97,10 +98,10 @@ const CreateEntry: React.FC = () => {
     }
   };
 
-  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>, docType: 'sales' | 'purchase') => {
     const file = e.target.files?.[0];
     if (!file) return;
-    await processDocumentUpload(file);
+    await processDocumentUpload(file, docType);
     e.target.value = '';
   };
 
@@ -292,11 +293,19 @@ const CreateEntry: React.FC = () => {
               Purchase Entry
             </button>
           </div>
-          <label className={`cursor-pointer flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all text-white shadow-md w-full sm:w-auto ${uploadingPdf ? 'bg-slate-400' : 'bg-emerald-500 hover:bg-emerald-600'}`}>
-            <Upload className="h-4 w-4" />
-            {uploadingPdf ? 'Parsing...' : 'Upload PDF / Image'}
-            <input type="file" accept=".pdf, image/*" className="hidden" onChange={handlePdfUpload} disabled={uploadingPdf} />
-          </label>
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            <label className={`cursor-pointer flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all text-white shadow-md ${uploadingPdf ? 'bg-slate-400' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'}`}>
+              <Upload className="h-4 w-4" />
+              {uploadingPdf ? 'Parsing...' : 'Upload Sales Bill PDF'}
+              <input type="file" accept=".pdf, image/*" className="hidden" onChange={(e) => handlePdfUpload(e, 'sales')} disabled={uploadingPdf} />
+            </label>
+
+            <label className={`cursor-pointer flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all text-white shadow-md ${uploadingPdf ? 'bg-slate-400' : 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'}`}>
+              <Upload className="h-4 w-4" />
+              {uploadingPdf ? 'Parsing...' : 'Upload Purchase Bill PDF'}
+              <input type="file" accept=".pdf, image/*" className="hidden" onChange={(e) => handlePdfUpload(e, 'purchase')} disabled={uploadingPdf} />
+            </label>
+          </div>
         </div>
       </div>
 
@@ -816,12 +825,15 @@ const CreateEntry: React.FC = () => {
 
               {/* Items Table */}
               <div className="space-y-4">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Line Items</label>
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Extracted Line Items & Inventory Matching</label>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Fuzzy Matching Active</span>
+                </div>
                 <div className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
                   <table className="w-full text-left">
                     <thead className="bg-slate-100/50 border-b border-slate-200">
                       <tr>
-                        <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Item Description</th>
+                        <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Extracted Item & Match Status</th>
                         <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center w-24">Qty</th>
                         <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center w-32">Rate</th>
                         <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right w-32">Amount</th>
@@ -830,19 +842,64 @@ const CreateEntry: React.FC = () => {
                     <tbody className="divide-y divide-slate-100">
                       {(reviewData.items || []).map((item: any, idx: number) => (
                         <tr key={idx} className="bg-white">
-                          <td className="px-4 py-3">
-                            <input 
-                              type="text" 
-                              value={item.name}
-                              onChange={(e) => {
-                                const newItems = [...reviewData.items];
-                                newItems[idx].name = e.target.value;
-                                setReviewData({ ...reviewData, items: newItems });
-                              }}
-                              className="w-full bg-transparent font-bold text-slate-800 outline-none focus:text-indigo-600 transition-colors"
-                            />
+                          <td className="px-4 py-3 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <input 
+                                type="text" 
+                                value={item.name}
+                                onChange={(e) => {
+                                  const newItems = [...reviewData.items];
+                                  newItems[idx].name = e.target.value;
+                                  setReviewData({ ...reviewData, items: newItems });
+                                }}
+                                className="w-full bg-transparent font-bold text-slate-800 outline-none focus:text-indigo-600 transition-colors text-sm"
+                                placeholder="Item name..."
+                              />
+                              {item.matched ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                                  ✓ Matched
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
+                                  Unmatched
+                                </span>
+                              )}
+                            </div>
+                            
+                            {item.originalExtractedName && item.originalExtractedName !== item.name && (
+                              <p className="text-[10px] font-mono text-slate-400">PDF text: "{item.originalExtractedName}"</p>
+                            )}
+
+                            {/* Inventory Manual Picker Dropdown for Unmatched or changing match */}
+                            <div className="pt-1">
+                              <select
+                                value={inventoryItems.some(inv => inv.name === item.name) ? item.name : ''}
+                                onChange={(e) => {
+                                  const selectedName = e.target.value;
+                                  if (!selectedName) return;
+                                  const inv = inventoryItems.find(i => i.name === selectedName);
+                                  const newItems = [...reviewData.items];
+                                  newItems[idx].name = selectedName;
+                                  if (inv) {
+                                    newItems[idx].rate = Number(inv.rate) || newItems[idx].rate;
+                                    newItems[idx].gst = Number(inv.gst) || 18;
+                                    newItems[idx].amount = Number((newItems[idx].quantity * newItems[idx].rate).toFixed(2));
+                                  }
+                                  newItems[idx].matched = true;
+                                  setReviewData({ ...reviewData, items: newItems });
+                                }}
+                                className="w-full text-[11px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 outline-none focus:border-indigo-400 cursor-pointer"
+                              >
+                                <option value="">-- {item.matched ? 'Change matched inventory item' : 'Select matching item from inventory...'} --</option>
+                                {inventoryItems.map((inv: any, i: number) => (
+                                  <option key={i} value={inv.name}>
+                                    {inv.name} (₹{inv.rate} • GST {inv.gst || 18}%)
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 align-top pt-4">
                             <input 
                               type="number" 
                               value={item.quantity}
@@ -864,7 +921,7 @@ const CreateEntry: React.FC = () => {
                               className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
                             />
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 align-top pt-4">
                             <input 
                               type="number" 
                               value={item.rate}
@@ -886,7 +943,7 @@ const CreateEntry: React.FC = () => {
                               className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
                             />
                           </td>
-                          <td className="px-4 py-3 text-right font-mono font-black text-slate-900">
+                          <td className="px-4 py-3 text-right font-mono font-black text-slate-900 align-top pt-4">
                             {formatCurrency(item.quantity * item.rate)}
                           </td>
                         </tr>
