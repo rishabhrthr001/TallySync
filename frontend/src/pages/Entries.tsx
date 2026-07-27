@@ -291,7 +291,7 @@ const Entries: React.FC = () => {
 
       {/* Off-screen container for react-to-print to prevent mobile fallbacks */}
       {printData && (
-        <div className="absolute top-[-9999px] left-[-9999px] print:static print:block">
+        <div className="print-container absolute top-[-9999px] left-[-9999px] print:static print:block">
           <PrintableInvoice ref={printRef} data={printData} user={user} />
         </div>
       )}

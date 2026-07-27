@@ -1026,7 +1026,7 @@ const CreateEntry: React.FC = () => {
       </datalist>
 
       {/* Off-screen container for react-to-print to prevent mobile fallbacks */}
-      <div className="absolute top-[-9999px] left-[-9999px] print:static print:block">
+      <div className="print-container absolute top-[-9999px] left-[-9999px] print:static print:block">
         <PrintableInvoice ref={contentRef} data={getInvoiceData()} user={user} />
       </div>
 

@@ -74,3 +74,26 @@ body {
   animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@media print {
+  /* Hide all elements during printing */
+  body * {
+    visibility: hidden !important;
+  }
+  
+  /* Make the print container and all its children visible */
+  .print-container,
+  .print-container * {
+    visibility: visible !important;
+  }
+  
+  /* Position the print container at the top left of the print page */
+  .print-container {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    display: block !important;
+  }
+}
+
