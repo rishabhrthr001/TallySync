@@ -436,7 +436,11 @@ const Dashboard: React.FC = () => {
                   }`}>
                     {e.type === 'sales' ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex flex-col">
+                    {/* Invoice Number on mobile (above party name) */}
+                    <span className="sm:hidden text-[10px] font-bold text-slate-400 font-mono mb-1 tracking-wide">
+                      {e.invoiceNumber || 'NO-REF'} • {e.date}
+                    </span>
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-black text-slate-850 truncate leading-snug">{e.partyName}</p>
                       <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
@@ -445,7 +449,8 @@ const Dashboard: React.FC = () => {
                         {e.type}
                       </span>
                     </div>
-                    <p className="text-[10px] font-bold text-slate-400 mt-1 font-mono tracking-wide">
+                    {/* Invoice Number on desktop (below party name) */}
+                    <p className="hidden sm:block text-[10px] font-bold text-slate-400 mt-1 font-mono tracking-wide">
                       {e.invoiceNumber || 'NO-REF'} • {e.date}
                     </p>
                   </div>
