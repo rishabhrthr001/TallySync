@@ -5,6 +5,13 @@ import Ledger from '../models/Ledger.js';
 import { authenticateToken, isAdmin } from '../middleware/auth.js';
 import multer from 'multer';
 import { extractInvoiceDetails, extractBankStatementDetails } from '../services/geminiService.js';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+const execPromise = promisify(exec);
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -438,6 +445,35 @@ router.patch('/:id/print-status', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Helper to decrypt PDF using Ghostscript (gs)
+async function decryptPdf(buffer: Buffer, password?: string): Promise<Buffer> {
+  if (!password) {
+    return buffer;
+  }
+  
+  const tempDir = os.tmpdir();
+  const timestamp = Date.now() + Math.random().toString(36).substr(2, 5);
+  const inputPath = path.join(tempDir, `input_${timestamp}.pdf`);
+  const outputPath = path.join(tempDir, `output_${timestamp}.pdf`);
+  
+  try {
+    await fs.promises.writeFile(inputPath, buffer);
+    // Execute Ghostscript to decrypt the PDF
+    const cmd = `gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile="${outputPath}" -sPDFPassword="${password.replace(/"/g, '\\"')}" "${inputPath}"`;
+    await execPromise(cmd);
+    
+    const decryptedBuffer = await fs.promises.readFile(outputPath);
+    return decryptedBuffer;
+  } catch (error: any) {
+    console.error('PDF decryption failed:', error);
+    throw new Error('Invalid PDF password or decryption failed. Please verify the password.');
+  } finally {
+    // Cleanup temporary files
+    try { await fs.promises.unlink(inputPath); } catch {}
+    try { await fs.promises.unlink(outputPath); } catch {}
+  }
+}
+
 // Route to accept bank statement (PDF, etc.) and return parsed transactions without saving them yet
 router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), async (req: any, res) => {
   try {
@@ -451,8 +487,29 @@ router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), a
       else finalMime = 'application/octet-stream';
     }
 
+    const password = req.body.password;
+    let fileBuffer = req.file.buffer;
+
+    if (password && finalMime === 'application/pdf') {
+      try {
+        fileBuffer = await decryptPdf(fileBuffer, password);
+      } catch (decruptErr: any) {
+        return res.status(400).json({ error: decruptErr.message });
+      }
+    }
+
     // Call gemini service to extract transactions
-    const data = await extractBankStatementDetails(req.file.buffer, finalMime);
+    let data;
+    try {
+      data = await extractBankStatementDetails(fileBuffer, finalMime);
+    } catch (parseErr: any) {
+      // Check if it looks like an encryption error
+      const errStr = parseErr.message || '';
+      if (errStr.toLowerCase().includes('encrypted') || errStr.toLowerCase().includes('password') || errStr.toLowerCase().includes('fail')) {
+        return res.status(400).json({ error: 'PDF parsing failed. This file might be password-protected. Please provide a password.' });
+      }
+      throw parseErr;
+    }
     const rawTransactions = data.transactions || [];
 
     const formattedTransactions = rawTransactions.map((txn: any) => {

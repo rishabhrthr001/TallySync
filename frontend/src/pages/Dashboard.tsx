@@ -36,6 +36,7 @@ const Dashboard: React.FC = () => {
   const [bankParseResult, setBankParseResult] = useState<any>(null);
   const [tempTransactions, setTempTransactions] = useState<any[]>([]);
   const [syncSaving, setSyncSaving] = useState(false);
+  const [bankPassword, setBankPassword] = useState<string>('');
 
   const updateTempTxn = (index: number, field: string, value: any) => {
     setTempTransactions(prev => prev.map((t, idx) => idx === index ? { ...t, [field]: value } : t));
@@ -55,6 +56,9 @@ const Dashboard: React.FC = () => {
 
     const formData = new FormData();
     formData.append('pdf', bankFile);
+    if (bankPassword) {
+      formData.append('password', bankPassword);
+    }
 
     try {
       const res = await axios.post('/api/entries/upload-bank-statement', formData, {
@@ -89,6 +93,7 @@ const Dashboard: React.FC = () => {
       setBankFile(null);
       setBankParseResult(null);
       setTempTransactions([]);
+      setBankPassword('');
       fetchData();
     } catch (err: any) {
       console.error(err);
@@ -639,6 +644,20 @@ const Dashboard: React.FC = () => {
                       {bankFile ? `${(bankFile.size / (1024 * 1024)).toFixed(2)} MB` : 'PDF format only'}
                     </span>
                   </div>
+
+                  {bankFile && (
+                    <div className="space-y-1 mt-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">PDF Password (Optional)</label>
+                      <input 
+                        type="password"
+                        placeholder="Enter statement password if encrypted"
+                        value={bankPassword}
+                        onChange={(e) => setBankPassword(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-850 outline-none focus:border-indigo-400 focus:bg-white transition-all"
+                        disabled={parsingBank}
+                      />
+                    </div>
+                  )}
                   
                   <div className="flex justify-end gap-3">
                     <button
