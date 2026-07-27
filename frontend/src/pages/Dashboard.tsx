@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { 
   TrendingUp, TrendingDown, DollarSign, Package, CreditCard, Plus, ArrowUpRight, ArrowDownRight, Sparkles, RefreshCcw,
-  Printer, CheckCircle2, Clock, XCircle
+  Printer, CheckCircle2, Clock, XCircle, Trash2, Check
 } from 'lucide-react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
@@ -34,6 +34,16 @@ const Dashboard: React.FC = () => {
   const [bankFile, setBankFile] = useState<File | null>(null);
   const [parsingBank, setParsingBank] = useState(false);
   const [bankParseResult, setBankParseResult] = useState<any>(null);
+  const [tempTransactions, setTempTransactions] = useState<any[]>([]);
+  const [syncSaving, setSyncSaving] = useState(false);
+
+  const updateTempTxn = (index: number, field: string, value: any) => {
+    setTempTransactions(prev => prev.map((t, idx) => idx === index ? { ...t, [field]: value } : t));
+  };
+
+  const removeTempTxn = (index: number) => {
+    setTempTransactions(prev => prev.filter((_, idx) => idx !== index));
+  };
 
   const handleBankUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,6 +51,7 @@ const Dashboard: React.FC = () => {
 
     setParsingBank(true);
     setBankParseResult(null);
+    setTempTransactions([]);
 
     const formData = new FormData();
     formData.append('pdf', bankFile);
@@ -53,13 +64,37 @@ const Dashboard: React.FC = () => {
         }
       });
       setBankParseResult(res.data);
-      showToast(`Successfully queued ${res.data.count} transactions for Tally sync!`, 'success');
-      fetchData();
+      setTempTransactions(res.data.data || []);
+      showToast(`Successfully extracted ${res.data.count} transactions. Please review them below!`, 'success');
     } catch (err: any) {
       console.error(err);
       showToast(err.response?.data?.error || 'Failed to parse bank statement', 'error');
     } finally {
       setParsingBank(false);
+    }
+  };
+
+  const handleConfirmAndSyncBank = async () => {
+    if (tempTransactions.length === 0) {
+      showToast("No transactions left to sync.", "error");
+      return;
+    }
+    setSyncSaving(true);
+    try {
+      const res = await axios.post('/api/entries/bulk', { transactions: tempTransactions }, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      showToast(`Successfully synced ${res.data.count} bank statement transactions!`, 'success');
+      setIsBankModalOpen(false);
+      setBankFile(null);
+      setBankParseResult(null);
+      setTempTransactions([]);
+      fetchData();
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.response?.data?.error || 'Failed to save transactions to database', 'error');
+    } finally {
+      setSyncSaving(false);
     }
   };
 
@@ -585,7 +620,7 @@ const Dashboard: React.FC = () => {
               {!bankParseResult ? (
                 <>
                   <p className="text-sm font-semibold text-slate-500 leading-relaxed">
-                    Upload your bank statement PDF to automatically extract transactions, classify them (Receipt, Payment, Contra, Journal), and sync them directly to your Tally software.
+                    Upload your bank statement PDF to extract transactions, review/edit details, and sync them directly to your Tally software.
                   </p>
                   
                   <div className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-8 flex flex-col items-center justify-center bg-slate-50/50 hover:bg-indigo-50/5 transition-all relative">
@@ -625,56 +660,148 @@ const Dashboard: React.FC = () => {
                       {parsingBank ? (
                         <>
                           <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
-                          Processing with Gemini...
+                          Processing...
                         </>
                       ) : (
-                        'Extract & Sync'
+                        'Extract & Preview'
                       )}
                     </button>
                   </div>
                 </>
               ) : (
                 <div className="space-y-5">
-                  <div className="text-center py-6 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex flex-col items-center">
-                    <CheckCircle2 className="h-12 w-12 text-emerald-500 mb-2" />
-                    <h4 className="text-lg font-black text-emerald-800">Extraction Complete!</h4>
-                    <p className="text-xs font-bold text-emerald-600 mt-1 uppercase tracking-wider">
-                      Successfully processed {bankParseResult.count} transactions
+                  <div className="text-center py-5 bg-indigo-50/60 rounded-2xl border border-indigo-100 flex flex-col items-center">
+                    <CheckCircle2 className="h-10 w-10 text-indigo-600 mb-2" />
+                    <h4 className="text-lg font-black text-indigo-900">Extracted Vouchers</h4>
+                    <p className="text-xs font-bold text-indigo-600 mt-1 uppercase tracking-wider">
+                      Please review and adjust transactions before syncing to Tally
                     </p>
                   </div>
                   
-                  <div className="max-h-60 overflow-y-auto space-y-2.5 pr-1">
-                    {bankParseResult.data.map((txn: any, idx: number) => (
-                      <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-200/60 rounded-xl text-xs font-semibold">
+                  {/* Preview list */}
+                  <div className="max-h-96 overflow-y-auto space-y-3.5 pr-1.5">
+                    {tempTransactions.map((txn: any, idx: number) => (
+                      <div key={idx} className="relative p-4 bg-slate-50 hover:bg-white rounded-2xl border border-slate-200/80 hover:border-indigo-200 transition-all shadow-xs space-y-3.5">
+                        <button
+                          type="button"
+                          onClick={() => removeTempTxn(idx)}
+                          className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
+                          title="Exclude transaction"
+                        >
+                          <Trash2 className="h-4.5 w-4.5" />
+                        </button>
+
+                        {/* Top metadata row */}
+                        <div className="grid grid-cols-2 gap-3.5">
+                          <div>
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Date</label>
+                            <input 
+                              type="date"
+                              value={txn.date}
+                              onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Type</label>
+                            <select
+                              value={txn.type}
+                              onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400 uppercase"
+                            >
+                              <option value="payment">Payment</option>
+                              <option value="receipt">Receipt</option>
+                              <option value="contra">Contra</option>
+                              <option value="journal">Journal</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Party name input */}
                         <div>
-                          <p className="font-bold text-slate-800">{txn.partyName}</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5 font-mono">{txn.date} • {txn.invoiceNumber}</p>
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Party / Ledger Name</label>
+                          <input 
+                            type="text"
+                            value={txn.partyName}
+                            onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400"
+                          />
                         </div>
-                        <div className="text-right">
-                          <p className="font-bold text-slate-800 font-mono">₹{txn.totalAmount.toLocaleString('en-IN')}</p>
-                          <span className={`inline-block text-[9px] font-bold uppercase tracking-wider mt-0.5 px-1.5 py-0.5 rounded-md ${
-                            txn.type === 'payment' ? 'bg-rose-50 text-rose-600 border border-rose-100' :
-                            txn.type === 'receipt' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
-                            'bg-amber-50 text-amber-600 border border-amber-100'
-                          }`}>
-                            {txn.type}
-                          </span>
+
+                        {/* Amount & Notes */}
+                        <div className="grid grid-cols-3 gap-3.5 items-end">
+                          <div className="col-span-1">
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Amount (₹)</label>
+                            <input 
+                              type="number"
+                              value={txn.totalAmount}
+                              onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400 font-mono"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Narration</label>
+                            <input 
+                              type="text"
+                              value={txn.notes}
+                              onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
+                              placeholder="Transaction details..."
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 outline-none focus:border-indigo-400"
+                            />
+                          </div>
                         </div>
+
+                        {/* Quality score bar */}
+                        {txn.confidence !== undefined && (
+                          <div className="flex items-center gap-2 pt-1.5 border-t border-slate-100/80 text-[9px] font-bold text-slate-450 uppercase tracking-wider">
+                            <span>Confidence:</span>
+                            <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full rounded-full ${txn.confidence > 0.8 ? 'bg-emerald-500' : txn.confidence > 0.5 ? 'bg-amber-500' : 'bg-rose-500'}`} 
+                                style={{ width: `${txn.confidence * 100}%` }}
+                              />
+                            </div>
+                            <span>{(txn.confidence * 100).toFixed(0)}%</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsBankModalOpen(false);
-                      setBankFile(null);
-                      setBankParseResult(null);
-                    }}
-                    className="w-full py-3.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all text-center cursor-pointer"
-                  >
-                    Done
-                  </button>
+                  {/* Submit / Cancel Actions */}
+                  <div className="flex gap-3 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsBankModalOpen(false);
+                        setBankFile(null);
+                        setBankParseResult(null);
+                        setTempTransactions([]);
+                      }}
+                      className="flex-1 py-3.5 border border-slate-250 hover:bg-slate-50 text-slate-600 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center"
+                      disabled={syncSaving}
+                    >
+                      Discard Vouchers
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmAndSyncBank}
+                      disabled={syncSaving || tempTransactions.length === 0}
+                      className="flex-2 py-3.5 bg-gradient-to-tr from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/10 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {syncSaving ? (
+                        <>
+                          <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
+                          Syncing to Tally...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="h-4 w-4" />
+                          Confirm & Sync ({tempTransactions.length})
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
             </form>

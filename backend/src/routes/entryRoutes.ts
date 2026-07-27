@@ -438,7 +438,7 @@ router.patch('/:id/print-status', authenticateToken, async (req: any, res) => {
   }
 });
 
-// Route to accept bank statement (PDF, etc.)
+// Route to accept bank statement (PDF, etc.) and return parsed transactions without saving them yet
 router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), async (req: any, res) => {
   try {
     if (!req.file) {
@@ -453,15 +453,10 @@ router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), a
 
     // Call gemini service to extract transactions
     const data = await extractBankStatementDetails(req.file.buffer, finalMime);
-    const transactions = data.transactions || [];
+    const rawTransactions = data.transactions || [];
 
-    const createdEntries = [];
-
-    // For each extracted transaction, insert into database as a pending Entry
-    for (const txn of transactions) {
+    const formattedTransactions = rawTransactions.map((txn: any) => {
       const lowercaseType = txn.voucherType.toLowerCase();
-
-      // For partyName fallback
       let party = txn.partyName || '';
       if (!party) {
         if (lowercaseType === 'payment') {
@@ -472,12 +467,42 @@ router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), a
           party = 'Bank Adjustments';
         }
       }
+      return {
+        date: txn.date,
+        type: lowercaseType,
+        partyName: party,
+        invoiceNumber: txn.referenceNumber || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`,
+        totalAmount: txn.amount,
+        notes: txn.narration || '',
+        confidence: txn.confidence || 1.0,
+        reason: txn.reason || '',
+        bankLedger: txn.bankLedger || 'HDFC BANK'
+      };
+    });
 
-      // Generate a unique idempotencyKey or random reference if UTR/referenceNumber is not present
-      const refNum = txn.referenceNumber || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`;
-      const idempotencyKey = `${req.user.companyName}-${refNum}-${txn.amount}-${txn.date}`;
+    res.json({ success: true, count: formattedTransactions.length, data: formattedTransactions });
+  } catch (error: any) {
+    console.error('Bank statement parsing error DETAIL:', error);
+    res.status(500).json({ error: `Failed to parse bank statement: ${error.message}` });
+  }
+});
 
-      // Check if entry already exists (prevent duplicates on re-upload)
+// Bulk insert reviewed bank statement transactions or other vouchers
+router.post('/bulk', authenticateToken, async (req: any, res) => {
+  const { transactions } = req.body;
+  if (!Array.isArray(transactions)) {
+    return res.status(400).json({ error: 'Invalid transactions array' });
+  }
+
+  const createdEntries = [];
+
+  try {
+    for (const txn of transactions) {
+      const lowercaseType = txn.type ? txn.type.toLowerCase() : 'payment';
+      const refNum = txn.invoiceNumber || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`;
+      const idempotencyKey = `${req.user.companyName}-${refNum}-${txn.totalAmount}-${txn.date}`;
+
+      // Check if entry already exists (prevent duplicate entries)
       const existing = await Entry.findOne({ idempotencyKey, companyName: req.user.companyName });
       if (existing) {
         createdEntries.push(existing);
@@ -488,31 +513,29 @@ router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), a
         userId: req.user.id,
         companyName: req.user.companyName,
         type: lowercaseType,
-        partyName: party,
+        partyName: txn.partyName || 'Bank Adjustments',
         partyGstin: '',
         invoiceNumber: refNum,
         date: txn.date,
         items: [],
-        taxableAmount: txn.amount,
+        taxableAmount: txn.totalAmount,
         taxAmount: 0,
-        totalAmount: txn.amount,
+        totalAmount: txn.totalAmount,
         gstType: 'cgst-sgst',
         status: 'pending',
-        bankLedger: txn.bankLedger || 'HDFC BANK', // default fallback
-        confidence: txn.confidence || 1.0,
-        reason: txn.reason || '',
-        idempotencyKey,
-        notes: txn.narration || `Automatically extracted bank statement transaction`
+        notes: txn.notes || 'Bulk imported bank transaction',
+        idempotencyKey
       });
 
       await newEntry.save();
       createdEntries.push(newEntry);
-      
+
+      // Update/Create Ledger
       const multiplier = (lowercaseType === 'sales' || lowercaseType === 'receipt') ? 1 : -1;
       await Ledger.findOneAndUpdate(
-        { companyName: req.user.companyName, partyName: party },
+        { companyName: req.user.companyName, partyName: newEntry.partyName },
         { 
-          $inc: { balance: txn.amount * multiplier }, 
+          $inc: { balance: newEntry.totalAmount * multiplier }, 
           $set: { 
             updatedAt: new Date(), 
             userId: req.user.id
@@ -524,8 +547,7 @@ router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), a
 
     res.json({ success: true, count: createdEntries.length, data: createdEntries });
   } catch (error: any) {
-    console.error('Bank statement parsing error DETAIL:', error);
-    res.status(500).json({ error: `Failed to parse bank statement: ${error.message}` });
+    res.status(500).json({ error: error.message });
   }
 });
 
