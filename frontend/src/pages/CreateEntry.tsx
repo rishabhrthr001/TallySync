@@ -368,6 +368,17 @@ const CreateEntry: React.FC = () => {
               </div>
             </div>
             <div className="space-y-1.5 md:col-span-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Invoice # Reference</label>
+              <input 
+                required
+                type="text" 
+                value={invoiceNumber} 
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+                placeholder="INV-001"
+                className="w-full px-4 py-3.5 bg-slate-50/50 border border-slate-200 rounded-2xl font-bold text-slate-800 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm font-mono text-sm"
+              />
+            </div>
+            <div className="space-y-1.5 md:col-span-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Date</label>
               <input 
                 required type="date" value={date} onChange={(e) => setDate(e.target.value)}
@@ -575,14 +586,6 @@ const CreateEntry: React.FC = () => {
                 <Printer className="h-5 w-5" /> Print Voucher
               </button>
             </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-sm space-y-3">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Invoice # Reference</label>
-            <input 
-              type="text" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm font-bold text-slate-600 focus:outline-none focus:border-indigo-400"
-            />
           </div>
           
           <div className="bg-white rounded-3xl border border-slate-200/60 shadow-sm overflow-hidden p-5 space-y-3">
@@ -1022,8 +1025,8 @@ const CreateEntry: React.FC = () => {
         ))}
       </datalist>
 
-      {/* Hidden layout for printing */}
-      <div className="hidden">
+      {/* Off-screen container for react-to-print to prevent mobile fallbacks */}
+      <div className="absolute top-[-9999px] left-[-9999px] print:static print:block">
         <PrintableInvoice ref={contentRef} data={getInvoiceData()} user={user} />
       </div>
 
