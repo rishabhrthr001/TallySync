@@ -509,9 +509,9 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Hidden container for react-to-print */}
+      {/* Off-screen container for react-to-print to prevent mobile fallbacks */}
       {printData && (
-        <div className="hidden">
+        <div className="absolute top-[-9999px] left-[-9999px] print:static print:block">
           <PrintableInvoice ref={printRef} data={printData} user={user} />
         </div>
       )}
