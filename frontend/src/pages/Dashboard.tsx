@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { 
-  TrendingUp, TrendingDown, DollarSign, Package, CreditCard, Plus, ArrowUpRight, ArrowDownRight, Sparkles, RefreshCcw
+  TrendingUp, TrendingDown, DollarSign, Package, CreditCard, Plus, ArrowUpRight, ArrowDownRight, Sparkles, RefreshCcw,
+  Printer, CheckCircle2, Clock, XCircle
 } from 'lucide-react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
@@ -11,6 +12,8 @@ import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/format';
 import { useToast } from '../contexts/ToastContext';
+import PrintableInvoice from '../components/PrintableInvoice';
+import { useReactToPrint } from 'react-to-print';
 
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
@@ -25,6 +28,64 @@ const Dashboard: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<string>('idle');
   const [syncError, setSyncError] = useState<string>('');
   const [syncLoading, setSyncLoading] = useState<boolean>(false);
+
+  // Print setup
+  const [printData, setPrintData] = useState<any>(null);
+  const printRef = useRef<HTMLDivElement>(null);
+  const handlePrintAction = useReactToPrint({
+    contentRef: printRef,
+    onAfterPrint: () => setPrintData(null)
+  });
+
+  useEffect(() => {
+    if (printData && printRef.current) {
+      handlePrintAction();
+    }
+  }, [printData, handlePrintAction]);
+
+  // Tab filter state for recent entries
+  const [recentFilter, setRecentFilter] = useState<'all' | 'today' | 'yesterday' | 'week'>('all');
+
+  const handlePrintBill = async (entry: any) => {
+    try {
+      // Mark as printed in the DB
+      await axios.patch(`/api/entries/${entry._id}/print-status`, {}, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      // Update local state
+      setRecentEntries(prev => prev.map(e => e._id === entry._id ? { ...e, printed: true, printedAt: new Date() } : e));
+      // Set print data
+      setPrintData({ ...entry, companyName: user?.companyName });
+      showToast("Invoice marked as printed & sent to printer", "success");
+    } catch (err) {
+      console.error("Failed to update print status", err);
+      // Fallback print
+      setPrintData({ ...entry, companyName: user?.companyName });
+    }
+  };
+
+  const getFilteredRecentEntries = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    return recentEntries.filter((e: any) => {
+      if (recentFilter === 'today') {
+        return e.date === todayStr;
+      }
+      if (recentFilter === 'yesterday') {
+        return e.date === yesterdayStr;
+      }
+      if (recentFilter === 'week') {
+        return new Date(e.date) >= sevenDaysAgo;
+      }
+      return true;
+    });
+  };
 
   const fetchData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -47,7 +108,7 @@ const Dashboard: React.FC = () => {
       }, 0);
       setStockValue(totalStockValue);
       
-      setRecentEntries((entriesRes.data || []).slice(0, 5));
+      setRecentEntries(entriesRes.data || []);
     } catch (err) {
       console.error('Error fetching dashboard data', err);
     } finally {
@@ -330,62 +391,125 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Recent Entries Section */}
+      {/* Recent Bills Section */}
       <div className="mt-8 bg-white p-6 md:p-8 rounded-3xl border border-slate-200/60 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.03)]">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6 border-b border-slate-100 pb-5">
           <div>
-            <h3 className="font-black text-slate-850 text-lg">Recent Entries</h3>
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mt-0.5">Quick status monitoring</p>
+            <h3 className="font-black text-slate-850 text-xl tracking-tight">Recent Bills</h3>
+            <p className="text-slate-400 text-xs font-semibold mt-0.5">Quickly filter, reprint, and verify print statuses</p>
           </div>
-          <Link 
-            to="/entries" 
-            className="text-xs font-black text-indigo-650 hover:text-indigo-750 uppercase tracking-wider flex items-center gap-1"
-          >
-            View All <ArrowUpRight className="h-4.5 w-4.5" />
-          </Link>
+          
+          {/* Quick Filters */}
+          <div className="flex bg-slate-100/80 p-1.5 rounded-2xl gap-1 self-start md:self-auto">
+            {(['all', 'today', 'yesterday', 'week'] as const).map((filter) => (
+              <button
+                key={filter}
+                onClick={() => setRecentFilter(filter)}
+                className={`px-4 py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer ${
+                  recentFilter === filter
+                    ? 'bg-white text-indigo-600 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {filter === 'week' ? 'Last 7 Days' : filter}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Mobile-optimized list of recent entries */}
+        {/* List of recent bills */}
         <div className="space-y-3.5">
-          {recentEntries.length === 0 ? (
-            <p className="text-center text-sm font-semibold text-slate-405 py-6">No recent entries found</p>
+          {getFilteredRecentEntries().length === 0 ? (
+            <div className="text-center py-12 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+              <Printer className="h-8 w-8 text-slate-350 mx-auto stroke-[1.5] mb-2.5" />
+              <p className="text-sm font-bold text-slate-400">No bills found for the selected timeframe</p>
+            </div>
           ) : (
-            recentEntries.map((e: any) => (
+            getFilteredRecentEntries().slice(0, 10).map((e: any) => (
               <div 
                 key={e._id} 
-                className="flex items-center justify-between p-4 bg-slate-50/40 hover:bg-slate-50/80 rounded-2xl border border-slate-100/80 hover:border-indigo-100 transition-all shadow-sm"
+                className="flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-slate-50/30 hover:bg-indigo-50/10 rounded-2xl border border-slate-200/50 hover:border-indigo-200/60 transition-all duration-200 gap-4"
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`p-2.5 rounded-xl hidden sm:block ${
-                    e.type === 'sales' ? 'bg-indigo-50 text-indigo-600' : 'bg-amber-50 text-amber-600'
+                <div className="flex items-center gap-4.5 min-w-0">
+                  <div className={`p-3 rounded-2xl shrink-0 ${
+                    e.type === 'sales' ? 'bg-indigo-50 text-indigo-650' : 'bg-amber-50 text-amber-650'
                   }`}>
-                    {e.type === 'sales' ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                    {e.type === 'sales' ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-black text-slate-800 truncate leading-snug">{e.partyName}</p>
-                    <p className="text-[10px] font-bold text-slate-400 mt-0.5 font-mono">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-black text-slate-850 truncate leading-snug">{e.partyName}</p>
+                      <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                        e.type === 'sales' ? 'bg-indigo-50/80 text-indigo-700' : 'bg-amber-50/80 text-amber-700'
+                      }`}>
+                        {e.type}
+                      </span>
+                    </div>
+                    <p className="text-[10px] font-bold text-slate-400 mt-1 font-mono tracking-wide">
                       {e.invoiceNumber || 'NO-REF'} • {e.date}
                     </p>
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-4 shrink-0 text-right">
-                  <div>
-                    <p className="text-sm font-black text-slate-900 font-mono">{formatCurrency(e.totalAmount || 0)}</p>
-                    <span className={`inline-flex items-center gap-1.5 text-[8.5px] font-black uppercase tracking-wider mt-1.5 px-2 py-0.5 rounded-md ${
-                      e.status === 'success' ? 'text-emerald-600 bg-emerald-50' :
-                      e.status === 'failed' ? 'text-rose-600 bg-rose-50' :
-                      'text-amber-600 bg-amber-55 animate-pulse'
+                <div className="flex items-center justify-between sm:justify-end gap-5 border-t border-slate-100 sm:border-0 pt-3 sm:pt-0">
+                  {/* Status & Printed Badges */}
+                  <div className="flex items-center gap-3">
+                    {/* Sync Status */}
+                    <span className={`inline-flex items-center gap-1.5 text-[8.5px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${
+                      e.status === 'success' ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' :
+                      e.status === 'failed' ? 'text-rose-700 bg-rose-50 border border-rose-100' :
+                      'text-amber-700 bg-amber-50 border border-amber-100 animate-pulse'
                     }`}>
                       {e.status || 'pending'}
                     </span>
+
+                    {/* Printed Status */}
+                    <span className={`inline-flex items-center gap-1 text-[8.5px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${
+                      e.printed
+                        ? 'text-emerald-700 bg-emerald-50 border border-emerald-100/60'
+                        : 'text-slate-500 bg-slate-150 border border-slate-200'
+                    }`}>
+                      <Printer className="h-3 w-3 stroke-[2.2]" />
+                      {e.printed ? 'Printed' : 'Not Printed'}
+                    </span>
+                  </div>
+
+                  {/* Pricing and Action */}
+                  <div className="flex items-center gap-4.5">
+                    <p className="text-sm font-black text-slate-900 font-mono tracking-tight shrink-0">
+                      {formatCurrency(e.totalAmount || 0)}
+                    </p>
+                    
+                    <button
+                      onClick={() => handlePrintBill(e)}
+                      className="p-3 bg-white hover:bg-indigo-650 text-slate-600 hover:text-white border border-slate-200 hover:border-indigo-650 rounded-xl transition-all shadow-sm cursor-pointer hover:scale-105 active:scale-95 flex items-center justify-center"
+                      title="Print Invoice"
+                    >
+                      <Printer className="h-4.5 w-4.5" />
+                    </button>
                   </div>
                 </div>
               </div>
             ))
           )}
         </div>
+
+        <div className="flex justify-center mt-6">
+          <Link 
+            to="/entries" 
+            className="text-xs font-black text-indigo-650 hover:text-indigo-750 uppercase tracking-wider flex items-center gap-1.5 bg-indigo-50/50 hover:bg-indigo-50 px-5 py-3 rounded-2xl transition-colors"
+          >
+            Go to Voucher History <ArrowUpRight className="h-4 w-4" />
+          </Link>
+        </div>
       </div>
+
+      {/* Hidden container for react-to-print */}
+      {printData && (
+        <div className="hidden">
+          <PrintableInvoice ref={printRef} data={printData} user={user} />
+        </div>
+      )}
     </Layout>
   );
 };

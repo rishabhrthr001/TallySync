@@ -418,4 +418,24 @@ router.get('/dashboard-stats', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Update printed status
+router.patch('/:id/print-status', authenticateToken, async (req: any, res) => {
+  try {
+    let query: any = { _id: req.params.id };
+    if (req.user.role !== 'admin') {
+      query.companyName = req.user.companyName;
+    }
+    const entry = await Entry.findOne(query);
+    if (!entry) {
+      return res.status(404).json({ error: 'Entry not found' });
+    }
+    entry.printed = true;
+    entry.printedAt = new Date();
+    await entry.save();
+    res.json({ message: 'Printed status updated successfully', entry });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

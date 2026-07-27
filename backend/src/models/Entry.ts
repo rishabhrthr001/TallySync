@@ -28,6 +28,8 @@ const entrySchema = new mongoose.Schema({
     transporterName: String
   },
   syncError: { type: String, default: '' },
+  printed: { type: Boolean, default: false },
+  printedAt: { type: Date },
   createdAt: { type: Date, default: Date.now }
 });
 
