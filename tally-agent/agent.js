@@ -1368,6 +1368,7 @@ async function syncTallyTransactions(companyName) {
 
 async function checkPendingInventorySyncs() {
     try {
+        const activeCompany = await getActiveCompany();
         const res = await axios.get(`${CONFIG.BACKEND_URL}/api/inventory/sync-requests`, {
             headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
         });
@@ -1375,6 +1376,12 @@ async function checkPendingInventorySyncs() {
         for (const user of pendingUsers) {
             const companyName = user.companyName;
             if (!companyName) continue;
+            
+            if (!activeCompany || companyName.trim().toLowerCase() !== activeCompany.trim().toLowerCase()) {
+                console.log(`[SYNC-INV] Skipping sync request for "${companyName}" (not active in Tally). Keeping pending.`);
+                continue;
+            }
+            
             console.log(`\n[SYNC-INV] 🔄 Received pending inventory sync request for "${companyName}"...`);
             try {
                 const resolvedName = await resolveCompanyName(companyName);
@@ -1412,6 +1419,7 @@ async function checkPendingInventorySyncs() {
 
 async function checkPendingLedgerSyncs() {
     try {
+        const activeCompany = await getActiveCompany();
         const res = await axios.get(`${CONFIG.BACKEND_URL}/api/ledger/sync-requests`, {
             headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
         });
@@ -1419,6 +1427,12 @@ async function checkPendingLedgerSyncs() {
         for (const user of pendingUsers) {
             const companyName = user.companyName;
             if (!companyName) continue;
+            
+            if (!activeCompany || companyName.trim().toLowerCase() !== activeCompany.trim().toLowerCase()) {
+                console.log(`[SYNC-LEDG] Skipping sync request for "${companyName}" (not active in Tally). Keeping pending.`);
+                continue;
+            }
+            
             console.log(`\n[SYNC-LEDG] 🔄 Received pending ledger sync request for "${companyName}"...`);
             try {
                 const resolvedName = await resolveCompanyName(companyName);
@@ -1493,9 +1507,13 @@ async function run() {
                 const taskRes = await axios.get(`${CONFIG.BACKEND_URL}/api/entries/pending-sync-tasks`, {
                     headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
                 });
+                const activeCompany = await getActiveCompany();
                 const tasks = taskRes.data || [];
                 for (const task of tasks) {
                     if (task.type === 'sync_inventory_parties') {
+                        if (!activeCompany || !task.companyName || task.companyName.trim().toLowerCase() !== activeCompany.trim().toLowerCase()) {
+                            continue;
+                        }
                         await syncTallyInventoryAndParties(task.companyName, task._id);
                     }
                 }
@@ -1539,6 +1557,11 @@ async function run() {
             // Process each company
             for (const [companyName, bills] of Object.entries(companyGroups)) {
                 if (companyName === 'Unknown') continue;
+                
+                if (!activeCompany || companyName.trim().toLowerCase() !== activeCompany.trim().toLowerCase()) {
+                    console.log(`[SKIP] Skipping bills for company "${companyName}" since it does not match currently active company in Tally ("${activeCompany || 'None'}"). Keeping in pending.`);
+                    continue;
+                }
                 
                 console.log(`\n[PROCESS] Checking company: "${companyName}"...`);
                 
