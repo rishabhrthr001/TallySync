@@ -75,6 +75,12 @@ body {
 }
 
 @media print {
+  html, body {
+    height: 100% !important;
+    overflow: hidden !important;
+    max-height: 100vh !important;
+  }
+
   /* Hide all elements during printing */
   body * {
     visibility: hidden !important;
@@ -86,14 +92,16 @@ body {
     visibility: visible !important;
   }
   
-  /* Position the print container at the top left of the print page */
+  /* Position the print container to cover the fixed viewport page */
   .print-container {
-    position: absolute !important;
+    position: fixed !important;
     left: 0 !important;
     top: 0 !important;
     width: 100% !important;
-    height: auto !important;
+    height: 100% !important;
     display: block !important;
+    z-index: 9999999 !important;
+    background: white !important;
   }
 }
 
