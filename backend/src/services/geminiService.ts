@@ -267,4 +267,123 @@ GENERAL INSTRUCTIONS:
   }
 }
 
+// Strict JSON schema constraints for bank statement details extraction
+const bankStatementExtractionSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    transactions: {
+      type: SchemaType.ARRAY,
+      description: 'The list of transactions extracted from the bank statement.',
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          date: { type: SchemaType.STRING, description: 'Transaction date in YYYY-MM-DD format.' },
+          voucherType: { type: SchemaType.STRING, description: 'Type of voucher: Payment, Receipt, Contra, or Journal.' },
+          partyName: { type: SchemaType.STRING, description: 'Name of the party/ledger extracted from the narration. E.g. NEFT ABC INDUSTRIES -> ABC INDUSTRIES. If not clear, set as null.' },
+          partyLedger: { type: SchemaType.STRING, description: 'Suggested party ledger name or null.' },
+          amount: { type: SchemaType.NUMBER, description: 'Voucher amount (debit amount if Payment, credit amount if Receipt).' },
+          bankLedger: { type: SchemaType.STRING, description: 'Name of the bank account ledger if visible (e.g. HDFC BANK). If not clear, default to null.' },
+          narration: { type: SchemaType.STRING, description: 'Cleaned transaction narration.' },
+          referenceNumber: { type: SchemaType.STRING, description: 'Reference/UTR number of transaction if available.' },
+          confidence: { type: SchemaType.NUMBER, description: 'Confidence score from 0.0 to 1.0.' },
+          reason: { type: SchemaType.STRING, description: 'Short reason for selecting this voucher type.' }
+        },
+        required: ['date', 'voucherType', 'amount', 'narration', 'confidence', 'reason']
+      }
+    }
+  },
+  required: ['transactions']
+};
+
+export interface ExtractedBankTransaction {
+  date: string;
+  voucherType: 'Payment' | 'Receipt' | 'Contra' | 'Journal';
+  partyName: string | null;
+  partyLedger: string | null;
+  amount: number;
+  bankLedger: string | null;
+  narration: string;
+  referenceNumber: string | null;
+  confidence: number;
+  reason: string;
+}
+
+export interface ExtractedBankStatementInfo {
+  transactions: ExtractedBankTransaction[];
+}
+
+/**
+ * Extracts structured transaction details from a bank statement PDF/image using Gemini 1.5 Pro.
+ */
+export async function extractBankStatementDetails(buffer: Buffer, mimeType: string): Promise<ExtractedBankStatementInfo> {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
+
+    const docPart = {
+      inlineData: {
+        data: buffer.toString('base64'),
+        mimeType: mimeType
+      }
+    };
+
+    const prompt = `You are an expert accountant with deep knowledge of Tally Prime, Indian accounting practices, and bank statement reconciliation.
+
+Your task is to analyze a bank statement (PDF or extracted text) and convert every transaction into a structured voucher that can be imported into Tally.
+
+EXTRACT EVERY TRANSACTION. DO NOT SKIP TRANSACTIONS.
+
+Instructions:
+1. Extract: Date, Narration, Debit/Credit Amount, Balance, and Reference/UTR Number.
+2. Determine the voucher type:
+   - Money received (Credit amount) -> Receipt
+   - Money paid (Debit amount) -> Payment
+   - Transfer between own bank accounts -> Contra
+   - Interest, adjustments, reversals -> Journal
+3. Identify the Party name from narration (e.g. NEFT ABC INDUSTRIES -> ABC INDUSTRIES). If unclear, set partyName to null.
+4. Ledgers: Map partyName to partyLedger. Never invent ledger names. Set to null if uncertain.
+5. Narration: Clean narration (e.g., strip UPI/UTR codes to make it readable in Tally).
+6. Voucher Amount: Use the debit amount for Payments, and credit amount for Receipts.
+7. Confidence: Return score between 0 and 1.
+8. Reason: Provide a short explanation for the selected voucher type.`;
+
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            docPart
+          ]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: bankStatementExtractionSchema as any
+      }
+    });
+
+    const responseText = result.response.text();
+    if (!responseText) {
+      throw new Error('Gemini 1.5 Pro returned empty content.');
+    }
+
+    return JSON.parse(responseText) as ExtractedBankStatementInfo;
+  } catch (error: any) {
+    console.error('Gemini bank statement extraction error:', error);
+    try {
+      console.log('Retrying bank statement extraction with gemini-2.5-flash fallback...');
+      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      const docPart = { inlineData: { data: buffer.toString('base64'), mimeType } };
+      const fallbackPrompt = `Extract all transactions from this bank statement as JSON with date, voucherType (Payment/Receipt/Contra/Journal), partyName, amount, narration, referenceNumber, confidence, reason.`;
+      const fallbackResult = await fallbackModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: fallbackPrompt }, docPart] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: bankStatementExtractionSchema as any }
+      });
+      return JSON.parse(fallbackResult.response.text()) as ExtractedBankStatementInfo;
+    } catch (fallbackError: any) {
+      throw new Error(`Gemini bank statement extraction failed: ${error.message || error}`);
+    }
+  }
+}
+
 

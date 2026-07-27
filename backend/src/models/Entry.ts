@@ -10,17 +10,20 @@ const lineItemSchema = new mongoose.Schema({
 const entrySchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   companyName: { type: String, required: true },
-  type: { type: String, enum: ['sales', 'purchase'], required: true },
-  partyName: { type: String, required: true },
+  type: { type: String, enum: ['sales', 'purchase', 'payment', 'receipt', 'contra', 'journal'], required: true },
+  partyName: { type: String, default: '' },
   partyGstin: { type: String, default: '' },
-  invoiceNumber: { type: String, required: true },
+  invoiceNumber: { type: String, default: '' },
   date: { type: String, required: true }, // Format YYYY-MM-DD
-  items: [lineItemSchema],
-  taxableAmount: { type: Number, required: true },
-  taxAmount: { type: Number, default: 18 }, // Default 18% or specific amount
+  items: { type: [lineItemSchema], default: [] },
+  taxableAmount: { type: Number, default: 0 },
+  taxAmount: { type: Number, default: 0 },
   totalAmount: { type: Number, required: true },
   gstType: { type: String, enum: ['cgst-sgst', 'igst'], default: 'cgst-sgst' },
   status: { type: String, enum: ['pending', 'success', 'failed'], default: 'pending' },
+  bankLedger: { type: String, default: '' },
+  confidence: { type: Number, default: 1.0 },
+  reason: { type: String, default: '' },
   idempotencyKey: { type: String, unique: true },
   notes: { type: String, default: '' },
   transporterDetails: {

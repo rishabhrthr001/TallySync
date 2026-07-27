@@ -598,6 +598,48 @@ function generateAccountingVoucherXML(entry, partyName, incomeLedger, taxLedgers
     return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth);
 }
 
+function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceFirstOfMonth = false) {
+    const dateStr = toTallyDate(entry.date, forceFirstOfMonth);
+    const amount = Math.abs(Number(entry.totalAmount));
+
+    let voucherType = 'Payment';
+    if (entry.type === 'receipt') voucherType = 'Receipt';
+    else if (entry.type === 'contra') voucherType = 'Contra';
+    else if (entry.type === 'journal') voucherType = 'Journal';
+
+    // Sign rules (Tally XML standard): Debit = Negative, Credit = Positive
+    let debitLedger, creditLedger;
+
+    if (entry.type === 'payment') {
+        debitLedger = partyLedger;
+        creditLedger = bankLedger;
+    } else if (entry.type === 'receipt') {
+        debitLedger = bankLedger;
+        creditLedger = partyLedger;
+    } else if (entry.type === 'contra') {
+        debitLedger = bankLedger; // destination
+        creditLedger = partyLedger; // source / cash ledger
+    } else { // journal
+        debitLedger = partyLedger;
+        creditLedger = bankLedger;
+    }
+
+    const body = `
+                        <PARTYLEDGERNAME>${escapeXML(partyLedger)}</PARTYLEDGERNAME>
+                        <LEDGERENTRIES.LIST>
+                            <LEDGERNAME>${escapeXML(debitLedger)}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
+                        </LEDGERENTRIES.LIST>
+                        <LEDGERENTRIES.LIST>
+                            <LEDGERNAME>${escapeXML(creditLedger)}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                        </LEDGERENTRIES.LIST>`;
+
+    return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth);
+}
+
 /**
  * STOCK JOURNAL — Adjusts stock quantities after accounting voucher.
  * For Sales:  stock goes OUT (INVENTORYENTRIESOUT → INVENTORYENTRIESIN transfer to consumed)
@@ -684,6 +726,97 @@ async function syncEntry(entry) {
 
     // Resolve exact Tally company name once
     entry.companyName = await resolveCompanyName(entry.companyName);
+
+    const bankVoucherTypes = ['payment', 'receipt', 'contra', 'journal'];
+    if (bankVoucherTypes.includes(entry.type.toLowerCase())) {
+        console.log(`[SYNC] Handling bank statement/accounting-only voucher: ${entry.type}`);
+        try {
+            // 1. Fetch current Tally ledger list
+            const masterData = await getLedgerList(entry.companyName);
+
+            // 2. Resolve/create party ledger and bank ledger
+            const bankName = (entry.bankLedger || 'HDFC BANK').trim();
+            const partyName = (entry.partyName || 'Bank Adjustments').trim();
+
+            const ledgersNeeded = [];
+
+            // Determine groups
+            let bankGroup = 'Bank Accounts';
+            if (bankName.toLowerCase().includes('cash')) {
+                bankGroup = 'Cash-in-hand';
+            }
+
+            let partyGroup = 'Sundry Creditors'; // default for payment
+            if (entry.type === 'receipt') {
+                partyGroup = 'Sundry Debtors';
+            } else if (entry.type === 'contra') {
+                partyGroup = 'Bank Accounts'; // Contra is bank-to-bank or cash-to-bank
+                if (partyName.toLowerCase().includes('cash')) {
+                    partyGroup = 'Cash-in-hand';
+                }
+            } else if (entry.type === 'journal') {
+                partyGroup = 'Indirect Expenses'; // default for journal charges
+            }
+
+            ledgersNeeded.push({ name: bankName, group: bankGroup });
+            ledgersNeeded.push({ name: partyName, group: partyGroup });
+
+            const resolvedNames = {};
+            for (const led of ledgersNeeded) {
+                const nameLower = led.name.toLowerCase();
+                if (['cash', 'bank', 'profit & loss'].includes(nameLower)) {
+                    resolvedNames[led.name] = led.name;
+                    continue;
+                }
+
+                const exactName = findExactName(masterData, led.name);
+                if (exactName) {
+                    resolvedNames[led.name] = exactName;
+                } else {
+                    console.log(`[LEDGER] Not found in Tally, creating: "${led.name}" under "${led.group}"`);
+                    await upsertLedger(entry.companyName, led.name, led.group, '', false);
+                    resolvedNames[led.name] = led.name;
+                }
+            }
+
+            const bankResolved = resolvedNames[bankName];
+            const partyResolved = resolvedNames[partyName];
+
+            // 3. Create Voucher
+            const isOk = (r) => r.includes('<CREATED>1</CREATED>') || r.includes('<ALTERED>1</ALTERED>');
+            let forcedDate = false;
+
+            let bankXml = generateBankAccountingVoucherXML(entry, partyResolved, bankResolved, false);
+            console.log(`[DEBUG XML]\n${bankXml}`);
+            let bankResponse = await tallyRequest(bankXml);
+            console.log(`[DEBUG RESPONSE]\n${bankResponse}`);
+
+            if (bankResponse.includes('Voucher date is missing')) {
+                console.warn(`[VOUCHER] ⚠️  Tally date error detected. Retrying with 1st of the month...`);
+                const retryXml = generateBankAccountingVoucherXML(entry, partyResolved, bankResolved, true);
+                bankResponse = await tallyRequest(retryXml);
+                console.log(`[DEBUG RESPONSE RETRY]\n${bankResponse}`);
+                forcedDate = true;
+            }
+
+            if (!isOk(bankResponse)) {
+                const errMatch = bankResponse.match(/<LINEERROR>(.*?)<\/LINEERROR>/is)
+                    || bankResponse.match(/<DESCRIPTION>(.*?)<\/DESCRIPTION>/is);
+                const errMsg = errMatch ? errMatch[1].replace(/\s+/g, ' ').trim() : 'Accounting voucher creation failed';
+                console.error(`[VOUCHER] ❌ FAILED: ${entry.invoiceNumber} — ${errMsg}`);
+                await updateBackendStatus(entry._id, 'failed', errMsg);
+                return;
+            }
+
+            console.log(`[VOUCHER] ✅ Accounting voucher created successfully for ${entry.invoiceNumber}`);
+            await updateBackendStatus(entry._id, 'success');
+            return;
+        } catch (error) {
+            console.error(`[SYNC] Exception for bank voucher ${entry.invoiceNumber}: ${error.message}`);
+            await updateBackendStatus(entry._id, 'failed', error.message);
+            return;
+        }
+    }
 
     // If totalAmount is 0 (missing from frontend), compute it from items
     if (!entry.totalAmount && entry.items && entry.items.length > 0) {
@@ -1093,9 +1226,143 @@ async function syncTallyInventoryAndParties(companyName, taskId) {
             headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
         });
         console.log(`[SYNC-TD] ✅ Data synced successfully to website!`);
+        await syncTallyTransactions(companyName);
     } catch (e) {
         console.error(`[SYNC-TD] ❌ Failed: ${e.message}`);
         throw e;
+    }
+}
+
+// ─── TRANSACTION SYNC ───────────────────────────────────────────────────────
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseVouchersFromXml(xml) {
+    const vouchers = [];
+    if (!xml) return vouchers;
+    
+    const blocks = xml.split(/<VOUCHER\b/gi);
+    for (let i = 1; i < blocks.length; i++) {
+        const block = blocks[i];
+        
+        const guidMatch = block.match(/<GUID>([\s\S]*?)<\/GUID>/i);
+        if (!guidMatch) continue;
+        const guid = unescapeXML(guidMatch[1].trim());
+        
+        const dateMatch = block.match(/<DATE>([\s\S]*?)<\/DATE>/i);
+        if (!dateMatch) continue;
+        const rawDate = dateMatch[1].trim();
+        const date = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
+        
+        const vchTypeMatch = block.match(/<VOUCHERTYPENAME>([\s\S]*?)<\/VOUCHERTYPENAME>/i);
+        const voucherType = vchTypeMatch ? unescapeXML(vchTypeMatch[1].trim()) : 'Journal';
+        
+        const vchNumMatch = block.match(/<VOUCHERNUMBER>([\s\S]*?)<\/VOUCHERNUMBER>/i);
+        const voucherNumber = vchNumMatch ? unescapeXML(vchNumMatch[1].trim()) : '';
+        
+        const refMatch = block.match(/<REFERENCE>([\s\S]*?)<\/REFERENCE>/i);
+        const reference = refMatch ? unescapeXML(refMatch[1].trim()) : '';
+        
+        const narMatch = block.match(/<NARRATION>([\s\S]*?)<\/NARRATION>/i);
+        const narration = narMatch ? unescapeXML(narMatch[1].trim()) : '';
+        
+        const partyMatch = block.match(/<PARTYLEDGERNAME>([\s\S]*?)<\/PARTYLEDGERNAME>/i);
+        let partyName = partyMatch ? cleanTallyName(unescapeXML(partyMatch[1].trim())) : '';
+        
+        let amount = 0;
+        if (partyName) {
+            const ledgerRegex = new RegExp(`<LEDGERNAME>\\s*${escapeRegExp(partyName)}\\s*<\\/LEDGERNAME>[\\s\\S]*?<AMOUNT>([\\s\\S]*?)<\\/AMOUNT>`, 'i');
+            const amtMatch = block.match(ledgerRegex);
+            if (amtMatch) {
+                const rawAmt = unescapeXML(amtMatch[1].trim());
+                const num = parseFloat(rawAmt.replace(/[^\d.-]/g, ''));
+                if (!isNaN(num)) {
+                    amount = -num;
+                }
+            }
+        }
+        
+        if (amount === 0) {
+            const entries = [];
+            const entryBlocks = block.split(/<(?:ALL)?LEDGERENTRIES\.LIST/gi);
+            for (let j = 1; j < entryBlocks.length; j++) {
+                const eb = entryBlocks[j];
+                const nameMatch = eb.match(/<LEDGERNAME>([\s\S]*?)<\/LEDGERNAME>/i);
+                const amtMatch = eb.match(/<AMOUNT>([\s\S]*?)<\/AMOUNT>/i);
+                if (nameMatch && amtMatch) {
+                    const name = cleanTallyName(unescapeXML(nameMatch[1].trim()));
+                    const rawAmt = unescapeXML(amtMatch[1].trim());
+                    const num = parseFloat(rawAmt.replace(/[^\d.-]/g, ''));
+                    if (!isNaN(num) && name) {
+                        entries.push({ name, amount: -num });
+                    }
+                }
+            }
+            if (entries.length > 0) {
+                if (!partyName) {
+                    partyName = entries[0].name;
+                }
+                const match = entries.find(e => e.name.toLowerCase() === partyName.toLowerCase());
+                amount = match ? match.amount : entries[0].amount;
+            }
+        }
+        
+        if (!partyName) continue;
+        
+        vouchers.push({
+            partyName,
+            voucherNumber,
+            voucherType,
+            date,
+            amount,
+            narration,
+            reference,
+            guid
+        });
+    }
+    return vouchers;
+}
+
+async function syncTallyTransactions(companyName) {
+    try {
+        console.log(`[SYNC-TXN] 🔄 Fetching transactions from Tally Day Book for "${companyName}"...`);
+        const xml = `
+<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Export Data</TALLYREQUEST>
+  </HEADER>
+  <BODY>
+    <EXPORTDATA>
+      <REQUESTDESC>
+        <REPORTNAME>Day Book</REPORTNAME>
+        <STATICVARIABLES>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+          <EXPLODEFLAG>Yes</EXPLODEFLAG>
+          <SVFROMDATE>20250401</SVFROMDATE>
+          <SVTODATE>20280331</SVTODATE>
+        </STATICVARIABLES>
+      </REQUESTDESC>
+    </EXPORTDATA>
+  </BODY>
+</ENVELOPE>`;
+        
+        const responseXml = await tallyRequest(xml);
+        const parsedTxns = parseVouchersFromXml(responseXml);
+        
+        console.log(`[SYNC-TXN]   • Found ${parsedTxns.length} total vouchers in Tally.`);
+        
+        console.log(`[SYNC-TXN] Sending transaction history to website...`);
+        const syncRes = await axios.post(`${CONFIG.BACKEND_URL}/api/ledger/sync-transactions`, {
+            companyName,
+            transactions: parsedTxns
+        }, {
+            headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+        });
+        console.log(`[SYNC-TXN] ✅ Transaction history sync complete: ${syncRes.data.message}`);
+    } catch (err) {
+        console.error(`[SYNC-TXN] ❌ Failed to sync transaction history: ${err.message}`);
     }
 }
 
@@ -1172,6 +1439,7 @@ async function checkPendingLedgerSyncs() {
                     headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
                 });
                 console.log(`[SYNC-LEDG] ✅ Ledger sync complete!`);
+                await syncTallyTransactions(resolvedName);
             } catch (e) {
                 console.error(`[SYNC-LEDG] ❌ Failed: ${e.message}`);
                 try {
@@ -1202,6 +1470,17 @@ async function run() {
     try { console.log('partyDeemed check:', typeof partyDeemed); } catch(e) { console.log('partyDeemed is correctly undefined in JS scope.'); }
 
     await login();
+
+    // Auto-sync transaction history on startup for the open company
+    try {
+        const activeCompany = await getActiveCompany();
+        if (activeCompany) {
+            console.log(`\n[STARTUP-SYNC] 🔄 Auto-syncing transaction history for "${activeCompany}"...`);
+            await syncTallyTransactions(activeCompany);
+        }
+    } catch (e) {
+        console.error(`[STARTUP-SYNC] ❌ Failed to auto-sync transactions on startup: ${e.message}`);
+    }
 
     while (true) {
         try {

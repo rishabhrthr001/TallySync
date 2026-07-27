@@ -4,7 +4,7 @@ import Item from '../models/Item.js';
 import Ledger from '../models/Ledger.js';
 import { authenticateToken, isAdmin } from '../middleware/auth.js';
 import multer from 'multer';
-import { extractInvoiceDetails } from '../services/geminiService.js';
+import { extractInvoiceDetails, extractBankStatementDetails } from '../services/geminiService.js';
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -435,6 +435,97 @@ router.patch('/:id/print-status', authenticateToken, async (req: any, res) => {
     res.json({ message: 'Printed status updated successfully', entry });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Route to accept bank statement (PDF, etc.)
+router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), async (req: any, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    let finalMime = req.file.mimetype;
+    if (!finalMime) {
+      if (/\.pdf$/i.test(req.file.originalname)) finalMime = 'application/pdf';
+      else finalMime = 'application/octet-stream';
+    }
+
+    // Call gemini service to extract transactions
+    const data = await extractBankStatementDetails(req.file.buffer, finalMime);
+    const transactions = data.transactions || [];
+
+    const createdEntries = [];
+
+    // For each extracted transaction, insert into database as a pending Entry
+    for (const txn of transactions) {
+      const lowercaseType = txn.voucherType.toLowerCase();
+
+      // For partyName fallback
+      let party = txn.partyName || '';
+      if (!party) {
+        if (lowercaseType === 'payment') {
+          party = 'Bank Expenses';
+        } else if (lowercaseType === 'receipt') {
+          party = 'Bank Receipts';
+        } else {
+          party = 'Bank Adjustments';
+        }
+      }
+
+      // Generate a unique idempotencyKey or random reference if UTR/referenceNumber is not present
+      const refNum = txn.referenceNumber || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`;
+      const idempotencyKey = `${req.user.companyName}-${refNum}-${txn.amount}-${txn.date}`;
+
+      // Check if entry already exists (prevent duplicates on re-upload)
+      const existing = await Entry.findOne({ idempotencyKey, companyName: req.user.companyName });
+      if (existing) {
+        createdEntries.push(existing);
+        continue;
+      }
+
+      const newEntry = new Entry({
+        userId: req.user.id,
+        companyName: req.user.companyName,
+        type: lowercaseType,
+        partyName: party,
+        partyGstin: '',
+        invoiceNumber: refNum,
+        date: txn.date,
+        items: [],
+        taxableAmount: txn.amount,
+        taxAmount: 0,
+        totalAmount: txn.amount,
+        gstType: 'cgst-sgst',
+        status: 'pending',
+        bankLedger: txn.bankLedger || 'HDFC BANK', // default fallback
+        confidence: txn.confidence || 1.0,
+        reason: txn.reason || '',
+        idempotencyKey,
+        notes: txn.narration || `Automatically extracted bank statement transaction`
+      });
+
+      await newEntry.save();
+      createdEntries.push(newEntry);
+      
+      const multiplier = (lowercaseType === 'sales' || lowercaseType === 'receipt') ? 1 : -1;
+      await Ledger.findOneAndUpdate(
+        { companyName: req.user.companyName, partyName: party },
+        { 
+          $inc: { balance: txn.amount * multiplier }, 
+          $set: { 
+            updatedAt: new Date(), 
+            userId: req.user.id
+          } 
+        },
+        { upsert: true }
+      );
+    }
+
+    res.json({ success: true, count: createdEntries.length, data: createdEntries });
+  } catch (error: any) {
+    console.error('Bank statement parsing error DETAIL:', error);
+    res.status(500).json({ error: `Failed to parse bank statement: ${error.message}` });
   }
 });
 

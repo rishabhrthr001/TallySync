@@ -598,6 +598,48 @@ function generateAccountingVoucherXML(entry, partyName, incomeLedger, taxLedgers
     return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth);
 }
 
+function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceFirstOfMonth = false) {
+    const dateStr = toTallyDate(entry.date, forceFirstOfMonth);
+    const amount = Math.abs(Number(entry.totalAmount));
+
+    let voucherType = 'Payment';
+    if (entry.type === 'receipt') voucherType = 'Receipt';
+    else if (entry.type === 'contra') voucherType = 'Contra';
+    else if (entry.type === 'journal') voucherType = 'Journal';
+
+    // Sign rules (Tally XML standard): Debit = Negative, Credit = Positive
+    let debitLedger, creditLedger;
+
+    if (entry.type === 'payment') {
+        debitLedger = partyLedger;
+        creditLedger = bankLedger;
+    } else if (entry.type === 'receipt') {
+        debitLedger = bankLedger;
+        creditLedger = partyLedger;
+    } else if (entry.type === 'contra') {
+        debitLedger = bankLedger; // destination
+        creditLedger = partyLedger; // source / cash ledger
+    } else { // journal
+        debitLedger = partyLedger;
+        creditLedger = bankLedger;
+    }
+
+    const body = `
+                        <PARTYLEDGERNAME>${escapeXML(partyLedger)}</PARTYLEDGERNAME>
+                        <LEDGERENTRIES.LIST>
+                            <LEDGERNAME>${escapeXML(debitLedger)}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
+                        </LEDGERENTRIES.LIST>
+                        <LEDGERENTRIES.LIST>
+                            <LEDGERNAME>${escapeXML(creditLedger)}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                        </LEDGERENTRIES.LIST>`;
+
+    return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth);
+}
+
 /**
  * STOCK JOURNAL — Adjusts stock quantities after accounting voucher.
  * For Sales:  stock goes OUT (INVENTORYENTRIESOUT → INVENTORYENTRIESIN transfer to consumed)
@@ -684,6 +726,97 @@ async function syncEntry(entry) {
 
     // Resolve exact Tally company name once
     entry.companyName = await resolveCompanyName(entry.companyName);
+
+    const bankVoucherTypes = ['payment', 'receipt', 'contra', 'journal'];
+    if (bankVoucherTypes.includes(entry.type.toLowerCase())) {
+        console.log(`[SYNC] Handling bank statement/accounting-only voucher: ${entry.type}`);
+        try {
+            // 1. Fetch current Tally ledger list
+            const masterData = await getLedgerList(entry.companyName);
+
+            // 2. Resolve/create party ledger and bank ledger
+            const bankName = (entry.bankLedger || 'HDFC BANK').trim();
+            const partyName = (entry.partyName || 'Bank Adjustments').trim();
+
+            const ledgersNeeded = [];
+
+            // Determine groups
+            let bankGroup = 'Bank Accounts';
+            if (bankName.toLowerCase().includes('cash')) {
+                bankGroup = 'Cash-in-hand';
+            }
+
+            let partyGroup = 'Sundry Creditors'; // default for payment
+            if (entry.type === 'receipt') {
+                partyGroup = 'Sundry Debtors';
+            } else if (entry.type === 'contra') {
+                partyGroup = 'Bank Accounts'; // Contra is bank-to-bank or cash-to-bank
+                if (partyName.toLowerCase().includes('cash')) {
+                    partyGroup = 'Cash-in-hand';
+                }
+            } else if (entry.type === 'journal') {
+                partyGroup = 'Indirect Expenses'; // default for journal charges
+            }
+
+            ledgersNeeded.push({ name: bankName, group: bankGroup });
+            ledgersNeeded.push({ name: partyName, group: partyGroup });
+
+            const resolvedNames = {};
+            for (const led of ledgersNeeded) {
+                const nameLower = led.name.toLowerCase();
+                if (['cash', 'bank', 'profit & loss'].includes(nameLower)) {
+                    resolvedNames[led.name] = led.name;
+                    continue;
+                }
+
+                const exactName = findExactName(masterData, led.name);
+                if (exactName) {
+                    resolvedNames[led.name] = exactName;
+                } else {
+                    console.log(`[LEDGER] Not found in Tally, creating: "${led.name}" under "${led.group}"`);
+                    await upsertLedger(entry.companyName, led.name, led.group, '', false);
+                    resolvedNames[led.name] = led.name;
+                }
+            }
+
+            const bankResolved = resolvedNames[bankName];
+            const partyResolved = resolvedNames[partyName];
+
+            // 3. Create Voucher
+            const isOk = (r) => r.includes('<CREATED>1</CREATED>') || r.includes('<ALTERED>1</ALTERED>');
+            let forcedDate = false;
+
+            let bankXml = generateBankAccountingVoucherXML(entry, partyResolved, bankResolved, false);
+            console.log(`[DEBUG XML]\n${bankXml}`);
+            let bankResponse = await tallyRequest(bankXml);
+            console.log(`[DEBUG RESPONSE]\n${bankResponse}`);
+
+            if (bankResponse.includes('Voucher date is missing')) {
+                console.warn(`[VOUCHER] ⚠️  Tally date error detected. Retrying with 1st of the month...`);
+                const retryXml = generateBankAccountingVoucherXML(entry, partyResolved, bankResolved, true);
+                bankResponse = await tallyRequest(retryXml);
+                console.log(`[DEBUG RESPONSE RETRY]\n${bankResponse}`);
+                forcedDate = true;
+            }
+
+            if (!isOk(bankResponse)) {
+                const errMatch = bankResponse.match(/<LINEERROR>(.*?)<\/LINEERROR>/is)
+                    || bankResponse.match(/<DESCRIPTION>(.*?)<\/DESCRIPTION>/is);
+                const errMsg = errMatch ? errMatch[1].replace(/\s+/g, ' ').trim() : 'Accounting voucher creation failed';
+                console.error(`[VOUCHER] ❌ FAILED: ${entry.invoiceNumber} — ${errMsg}`);
+                await updateBackendStatus(entry._id, 'failed', errMsg);
+                return;
+            }
+
+            console.log(`[VOUCHER] ✅ Accounting voucher created successfully for ${entry.invoiceNumber}`);
+            await updateBackendStatus(entry._id, 'success');
+            return;
+        } catch (error) {
+            console.error(`[SYNC] Exception for bank voucher ${entry.invoiceNumber}: ${error.message}`);
+            await updateBackendStatus(entry._id, 'failed', error.message);
+            return;
+        }
+    }
 
     // If totalAmount is 0 (missing from frontend), compute it from items
     if (!entry.totalAmount && entry.items && entry.items.length > 0) {

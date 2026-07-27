@@ -29,6 +29,40 @@ const Dashboard: React.FC = () => {
   const [syncError, setSyncError] = useState<string>('');
   const [syncLoading, setSyncLoading] = useState<boolean>(false);
 
+  // Bank Statement states
+  const [isBankModalOpen, setIsBankModalOpen] = useState(false);
+  const [bankFile, setBankFile] = useState<File | null>(null);
+  const [parsingBank, setParsingBank] = useState(false);
+  const [bankParseResult, setBankParseResult] = useState<any>(null);
+
+  const handleBankUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bankFile) return;
+
+    setParsingBank(true);
+    setBankParseResult(null);
+
+    const formData = new FormData();
+    formData.append('pdf', bankFile);
+
+    try {
+      const res = await axios.post('/api/entries/upload-bank-statement', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      setBankParseResult(res.data);
+      showToast(`Successfully queued ${res.data.count} transactions for Tally sync!`, 'success');
+      fetchData();
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.response?.data?.error || 'Failed to parse bank statement', 'error');
+    } finally {
+      setParsingBank(false);
+    }
+  };
+
   // Print setup
   const [printData, setPrintData] = useState<any>(null);
   const printRef = useRef<HTMLDivElement>(null);
@@ -267,6 +301,14 @@ const Dashboard: React.FC = () => {
               : syncStatus === 'failed'
               ? 'Sync Failed (Retry)'
               : 'Sync from Tally'}
+          </button>
+
+          <button
+            onClick={() => setIsBankModalOpen(true)}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-tr from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-bold uppercase tracking-wider rounded-2xl shadow-lg shadow-emerald-500/15 transition-all active:scale-95 cursor-pointer"
+          >
+            <CreditCard className="h-4 w-4" />
+            Upload Statement
           </button>
 
           <Link 
@@ -513,6 +555,130 @@ const Dashboard: React.FC = () => {
       {printData && (
         <div className="print-container absolute top-[-9999px] left-[-9999px] print:static print:block">
           <PrintableInvoice ref={printRef} data={printData} user={user} />
+        </div>
+      )}
+
+      {/* Bank Statement Modal */}
+      {isBankModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-xl w-full shadow-2xl overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-50 text-emerald-605 rounded-xl">
+                  <CreditCard className="h-5 w-5" />
+                </div>
+                <h3 className="text-xl font-black text-slate-800">Upload Bank Statement</h3>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsBankModalOpen(false);
+                  setBankFile(null);
+                  setBankParseResult(null);
+                }} 
+                className="text-slate-400 hover:text-slate-650 transition-colors p-1 cursor-pointer"
+              >
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleBankUpload} className="p-6 space-y-6">
+              {!bankParseResult ? (
+                <>
+                  <p className="text-sm font-semibold text-slate-500 leading-relaxed">
+                    Upload your bank statement PDF to automatically extract transactions, classify them (Receipt, Payment, Contra, Journal), and sync them directly to your Tally software.
+                  </p>
+                  
+                  <div className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-8 flex flex-col items-center justify-center bg-slate-50/50 hover:bg-indigo-50/5 transition-all relative">
+                    <input 
+                      type="file" 
+                      accept=".pdf"
+                      onChange={(e) => setBankFile(e.target.files?.[0] || null)}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      disabled={parsingBank}
+                    />
+                    <CreditCard className="h-10 w-10 text-slate-400 mb-3 stroke-[1.5]" />
+                    <span className="text-sm font-bold text-slate-700">
+                      {bankFile ? bankFile.name : 'Choose bank statement PDF'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">
+                      {bankFile ? `${(bankFile.size / (1024 * 1024)).toFixed(2)} MB` : 'PDF format only'}
+                    </span>
+                  </div>
+                  
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsBankModalOpen(false);
+                        setBankFile(null);
+                      }}
+                      className="px-5 py-3 border border-slate-250 hover:bg-slate-50 text-slate-600 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+                      disabled={parsingBank}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!bankFile || parsingBank}
+                      className="px-6 py-3 bg-gradient-to-tr from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/10 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {parsingBank ? (
+                        <>
+                          <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
+                          Processing with Gemini...
+                        </>
+                      ) : (
+                        'Extract & Sync'
+                      )}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-5">
+                  <div className="text-center py-6 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex flex-col items-center">
+                    <CheckCircle2 className="h-12 w-12 text-emerald-500 mb-2" />
+                    <h4 className="text-lg font-black text-emerald-800">Extraction Complete!</h4>
+                    <p className="text-xs font-bold text-emerald-600 mt-1 uppercase tracking-wider">
+                      Successfully processed {bankParseResult.count} transactions
+                    </p>
+                  </div>
+                  
+                  <div className="max-h-60 overflow-y-auto space-y-2.5 pr-1">
+                    {bankParseResult.data.map((txn: any, idx: number) => (
+                      <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-200/60 rounded-xl text-xs font-semibold">
+                        <div>
+                          <p className="font-bold text-slate-800">{txn.partyName}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5 font-mono">{txn.date} • {txn.invoiceNumber}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-slate-800 font-mono">₹{txn.totalAmount.toLocaleString('en-IN')}</p>
+                          <span className={`inline-block text-[9px] font-bold uppercase tracking-wider mt-0.5 px-1.5 py-0.5 rounded-md ${
+                            txn.type === 'payment' ? 'bg-rose-50 text-rose-600 border border-rose-100' :
+                            txn.type === 'receipt' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                            'bg-amber-50 text-amber-600 border border-amber-100'
+                          }`}>
+                            {txn.type}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsBankModalOpen(false);
+                      setBankFile(null);
+                      setBankParseResult(null);
+                    }}
+                    className="w-full py-3.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all text-center cursor-pointer"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+            </form>
+          </div>
         </div>
       )}
     </Layout>
