@@ -43,23 +43,42 @@ export default function ProductRecognitionModal({ isOpen, onClose, onSelectProdu
     };
   }, [isOpen, facingMode]);
 
+  const attachStream = (videoEl: HTMLVideoElement | null, stream: MediaStream | null) => {
+    if (videoEl && stream) {
+      videoEl.srcObject = stream;
+      videoEl.onloadedmetadata = () => {
+        videoEl.play().catch(err => console.error("Error playing video:", err));
+      };
+    }
+  };
+
   const startCamera = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.warn('Camera API unavailable (requires HTTPS or supported browser)');
+      setHasCameraAccess(false);
+      return;
+    }
+
     try {
       stopCamera();
-      const constraints = {
-        video: { facingMode: { ideal: facingMode }, width: { ideal: 640 }, height: { ideal: 480 } }
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
-      const video = videoRef.current;
-      if (video) {
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          video.play().catch(err => console.error("Error playing video:", err));
+      let stream: MediaStream;
+      try {
+        const constraints = {
+          video: { facingMode: { ideal: facingMode }, width: { ideal: 640 }, height: { ideal: 480 } }
         };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (fallbackErr) {
+        console.warn('Preferred camera constraints failed, attempting fallback constraints:', fallbackErr);
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
+
+      streamRef.current = stream;
       setHasCameraAccess(true);
       setErrorMsg(null);
+
+      if (videoRef.current) {
+        attachStream(videoRef.current, stream);
+      }
     } catch (err) {
       console.warn('Camera access denied or unavailable. Falling back to file upload:', err);
       setHasCameraAccess(false);
@@ -70,6 +89,9 @@ export default function ProductRecognitionModal({ isOpen, onClose, onSelectProdu
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
   };
 
@@ -175,7 +197,18 @@ export default function ProductRecognitionModal({ isOpen, onClose, onSelectProdu
             ) : hasCameraAccess ? (
               // Live camera stream
               <>
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                <video
+                  ref={(el) => {
+                    videoRef.current = el;
+                    if (el && streamRef.current) {
+                      attachStream(el, streamRef.current);
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover"
+                />
                 {/* Scanner Glowing HUD Overlay */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                   <div className="w-60 h-40 border-2 border-indigo-400/80 rounded-2xl relative animate-pulse shadow-[0_0_20px_rgba(99,102,241,0.25)]">
