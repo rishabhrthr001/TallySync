@@ -41,6 +41,80 @@ router.get('/status', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Self-Service Claim 30-Day Free Trial (Restricted to 1 Trial per account)
+router.post('/claim-trial', authenticateToken, async (req: any, res) => {
+  try {
+    const userDoc = await User.findById(req.user.id);
+    if (!userDoc) return res.status(404).json({ error: 'User not found' });
+
+    if (userDoc.subscription?.hasClaimedTrial) {
+      return res.status(400).json({
+        error: 'TRIAL_ALREADY_CLAIMED',
+        message: 'Free trial has already been claimed for this account. Each account is eligible for 1 free trial.'
+      });
+    }
+
+    const now = new Date();
+    const endDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    userDoc.subscription = {
+      ...userDoc.subscription,
+      plan: 'trial',
+      trialStartDate: now,
+      trialEndDate: endDate,
+      hasClaimedTrial: true,
+      status: 'active'
+    };
+
+    await userDoc.save();
+
+    const todayCount = await getTodayBillCount(req.user.id, userDoc.companyName);
+    const subInfo = getUserSubscriptionInfo(userDoc, todayCount);
+
+    res.json({
+      success: true,
+      message: '🎉 30-Day Free Trial activated successfully!',
+      subscription: subInfo
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Self-Service Mock Razorpay Checkout (₹299/mo Pro Plan)
+router.post('/checkout-pro', authenticateToken, async (req: any, res) => {
+  try {
+    const { paymentId = `pay_mock_${Date.now()}` } = req.body;
+    const userDoc = await User.findById(req.user.id);
+    if (!userDoc) return res.status(404).json({ error: 'User not found' });
+
+    const now = new Date();
+    const endDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    userDoc.subscription = {
+      ...userDoc.subscription,
+      plan: 'pro',
+      proStartDate: now,
+      proEndDate: endDate,
+      status: 'active'
+    };
+
+    await userDoc.save();
+
+    const todayCount = await getTodayBillCount(req.user.id, userDoc.companyName);
+    const subInfo = getUserSubscriptionInfo(userDoc, todayCount);
+
+    res.json({
+      success: true,
+      paymentId,
+      message: '⚡ Upgraded to Pro Package (₹299/mo) successfully!',
+      subscription: subInfo
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET all user subscriptions (Super Admin Panel for Pankaj)
 router.get('/admin/list', authenticateToken, isSuperAdminCheck, async (req, res) => {
   try {

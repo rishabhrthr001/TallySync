@@ -23,11 +23,13 @@ export function getUserSubscriptionInfo(userDoc: any, todayBillCount: number = 0
       billsCreatedToday: todayBillCount,
       remainingDailyBills: Infinity,
       isSuperAdmin: true,
+      hasClaimedTrial: true,
       status: 'active'
     };
   }
 
   const sub = userDoc.subscription || {};
+  const hasClaimedTrial = sub.hasClaimedTrial === true;
 
   // Check Pro Plan
   if (sub.plan === 'pro' && sub.proEndDate && new Date(sub.proEndDate) > now) {
@@ -42,6 +44,7 @@ export function getUserSubscriptionInfo(userDoc: any, todayBillCount: number = 0
       daysLeft,
       expiresAt: sub.proEndDate,
       isSuperAdmin: false,
+      hasClaimedTrial,
       status: 'active'
     };
   }
@@ -59,6 +62,7 @@ export function getUserSubscriptionInfo(userDoc: any, todayBillCount: number = 0
       daysLeft,
       expiresAt: sub.trialEndDate,
       isSuperAdmin: false,
+      hasClaimedTrial: true,
       status: 'active'
     };
   }
@@ -73,6 +77,7 @@ export function getUserSubscriptionInfo(userDoc: any, todayBillCount: number = 0
     billsCreatedToday: todayBillCount,
     remainingDailyBills: remaining,
     isSuperAdmin: false,
+    hasClaimedTrial,
     status: (sub.plan === 'trial' || sub.plan === 'pro') ? 'expired' : 'active'
   };
 }

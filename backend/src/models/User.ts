@@ -16,6 +16,7 @@ const userSchema = new mongoose.Schema({
     trialEndDate: { type: Date, default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) },
     proStartDate: { type: Date, default: null },
     proEndDate: { type: Date, default: null },
+    hasClaimedTrial: { type: Boolean, default: false },
     status: { type: String, enum: ['active', 'expired'], default: 'active' }
   },
   inventorySyncStatus: { type: String, enum: ['idle', 'pending', 'syncing', 'success', 'failed'], default: 'idle' },

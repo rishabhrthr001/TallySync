@@ -10,6 +10,7 @@ export interface SubscriptionInfo {
   daysLeft?: number;
   expiresAt?: string;
   isSuperAdmin?: boolean;
+  hasClaimedTrial?: boolean;
   status: 'active' | 'expired';
 }
 
