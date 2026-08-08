@@ -28,7 +28,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
-    { name: 'Create Entry', icon: FileText, path: '/create-entry' },
+    ...(user?.role !== 'admin' ? [{ name: 'Create Entry', icon: FileText, path: '/create-entry' }] : []),
     { 
       name: 'Reports', 
       icon: TrendingUp, 
@@ -40,7 +40,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   ];
 
   if (user?.role === 'admin') {
-    menuItems.push({ name: 'Admin Panel', icon: ShieldCheck, path: '/admin' });
+    menuItems.push({ name: 'Admin Control Panel', icon: ShieldCheck, path: '/admin' });
   }
 
   const handleLogout = async () => {
@@ -52,7 +52,12 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const mobileTabs = [
     { name: 'Home', icon: LayoutDashboard, path: '/dashboard' },
     { name: 'History', icon: History, path: '/entries' },
-    { name: 'Create', icon: Plus, path: '/create-entry', isFAB: true },
+    { 
+      name: user?.role === 'admin' ? 'Admin' : 'Create', 
+      icon: user?.role === 'admin' ? ShieldCheck : Plus, 
+      path: user?.role === 'admin' ? '/admin' : '/create-entry', 
+      isFAB: true 
+    },
     { name: 'Ledgers', icon: Users, path: '/ledgers' },
     { name: 'More', icon: MoreHorizontal, path: '#more', isMore: true },
   ];

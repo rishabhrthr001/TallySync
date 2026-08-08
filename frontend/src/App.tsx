@@ -30,6 +30,23 @@ function PrivateRoute({ children, adminOnly = false }: { children: React.ReactNo
   return <>{children}</>;
 }
 
+function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  if (!user) return <Navigate to="/login" />;
+  if (user.role === 'admin') return <Navigate to="/admin" />;
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <ToastProvider>
@@ -40,7 +57,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             
             <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-            <Route path="/create-entry" element={<PrivateRoute><CreateEntry /></PrivateRoute>} />
+            <Route path="/create-entry" element={<ClientOnlyRoute><CreateEntry /></ClientOnlyRoute>} />
             <Route path="/entries" element={<PrivateRoute><Entries /></PrivateRoute>} />
             <Route path="/inventory" element={<PrivateRoute><Inventory /></PrivateRoute>} />
             <Route path="/ledgers" element={<PrivateRoute><Ledgers /></PrivateRoute>} />
