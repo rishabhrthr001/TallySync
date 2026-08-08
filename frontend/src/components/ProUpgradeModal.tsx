@@ -17,7 +17,7 @@ export default function ProUpgradeModal({
   isOpen,
   onClose,
   title = "Unlock Full Potential with Pro Package",
-  subtitle = "Upgrade to Pro (₹299/mo) or claim your 30-Day Free Trial"
+  subtitle = "Upgrade to Pro (₹299/mo) to unlock full potential"
 }: ProUpgradeModalProps) {
   const { user, refreshUser } = useAuth();
   const { showToast } = useToast();

@@ -107,7 +107,7 @@ const CreateEntry: React.FC = () => {
 
     const isProOrTrial = user?.isSuperAdmin || user?.subscription?.isUnlimited;
     if (!isProOrTrial) {
-      showToast('🔒 PDF Bill Parsing is a Pro feature (₹299/mo). Upgrade to Pro or contact Pankaj for a 30-Day Free Trial!', 'error');
+      showToast('🔒 PDF Bill Parsing is a Pro feature (₹299/mo). Upgrade to Pro to unlock full potential!', 'error');
       setShowProModal(true);
       e.target.value = '';
       return;
@@ -464,7 +464,7 @@ const CreateEntry: React.FC = () => {
                         onClick={() => {
                           const isProOrTrial = user?.isSuperAdmin || user?.subscription?.isUnlimited;
                           if (!isProOrTrial) {
-                            showToast('🔒 AI Product Camera Scanner is a Pro feature (₹299/mo). Upgrade to Pro or contact Pankaj for a 30-Day Free Trial!', 'error');
+                            showToast('🔒 AI Product Camera Scanner is a Pro feature (₹299/mo). Upgrade to Pro to unlock full potential!', 'error');
                             setShowProModal(true);
                             return;
                           }
@@ -1101,7 +1101,7 @@ const CreateEntry: React.FC = () => {
             </h3>
 
             <p className="text-slate-500 text-xs sm:text-sm font-semibold mt-2 max-w-sm mx-auto leading-relaxed">
-              Accounts on the Free Tier can cut up to <span className="text-slate-900 font-extrabold">5 bills per day</span>. Upgrade to Pro Package or contact Super Admin Pankaj for a 30-Day Free Trial.
+              Accounts on the Free Tier can cut up to <span className="text-slate-900 font-extrabold">5 bills per day</span>. Upgrade to Pro Package to unlock full potential and enjoy unlimited bill creation and AI features.
             </p>
 
             {/* Package Offer Box */}
@@ -1127,12 +1127,16 @@ const CreateEntry: React.FC = () => {
             </div>
 
             <div className="space-y-3">
-              <a
-                href="mailto:pankaj@photoBill.com?subject=30-Day%20Trial%20/%20Pro%20Upgrade%20Request"
-                className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLimitModal(false);
+                  setShowProModal(true);
+                }}
+                className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-700 hover:to-emerald-700 text-white font-bold rounded-2xl flex items-center justify-center gap-2 text-xs uppercase tracking-wider shadow-lg shadow-indigo-500/20 transition-all cursor-pointer"
               >
-                Contact Pankaj (Super Admin) for 30-Day Trial
-              </a>
+                <Zap className="w-4 h-4 text-emerald-300 fill-emerald-300" /> Upgrade to Pro to Unlock Full Potential
+              </button>
               <button
                 type="button"
                 onClick={() => setShowLimitModal(false)}

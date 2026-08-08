@@ -120,7 +120,7 @@ export async function checkDailyBillLimit(req: any, res: Response, next: NextFun
     if (!subInfo.isUnlimited && todayCount >= 5) {
       return res.status(403).json({
         error: 'DAILY_BILL_LIMIT_EXCEEDED',
-        message: 'Daily bill limit reached (5 bills/day). Upgrade to Pro (₹299/mo) or contact Super Admin (Pankaj) for a 30-Day Free Trial.',
+        message: 'Daily bill limit reached (5 bills/day). Upgrade to Pro (₹299/mo) to unlock full potential.',
         billsCreatedToday: todayCount,
         limit: 5,
         subInfo
@@ -151,7 +151,7 @@ export async function checkProFeatureAccess(req: any, res: Response, next: NextF
     if (!subInfo.isUnlimited) {
       return res.status(403).json({
         error: 'PRO_FEATURE_LOCKED',
-        message: 'This feature (AI Product Camera Scanner & PDF/Bank Statement Parser) requires a Pro Package (₹299/mo) or 30-Day Free Trial. Contact Pankaj (Super Admin) to unlock!',
+        message: 'This feature (AI Product Camera Scanner & PDF/Bank Statement Parser) requires a Pro Package (₹299/mo). Upgrade to Pro to unlock full potential!',
         subInfo
       });
     }
