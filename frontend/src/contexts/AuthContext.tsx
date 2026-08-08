@@ -1,6 +1,19 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 
-interface User {
+export interface SubscriptionInfo {
+  plan: 'free' | 'trial' | 'pro' | 'superadmin';
+  planName: string;
+  isUnlimited: boolean;
+  maxDailyBills: number;
+  billsCreatedToday: number;
+  remainingDailyBills: number;
+  daysLeft?: number;
+  expiresAt?: string;
+  isSuperAdmin?: boolean;
+  status: 'active' | 'expired';
+}
+
+export interface User {
   id: string;
   name: string;
   email: string;
@@ -8,6 +21,8 @@ interface User {
   companyName?: string;
   gstin?: string;
   phone?: string;
+  isSuperAdmin?: boolean;
+  subscription?: SubscriptionInfo;
 }
 
 interface AuthContextType {

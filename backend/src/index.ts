@@ -22,6 +22,7 @@ import adminRoutes from './routes/adminRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import ledgerRoutes from './routes/ledgerRoutes.js';
 import recognitionRoutes from './routes/recognitionRoutes.js';
+import subscriptionRoutes from './routes/subscriptionRoutes.js';
 
 dotenv.config();
 
@@ -70,6 +71,7 @@ async function startServer() {
           email: 'pankaj@photoBill.com',
           password: hashedPassword,
           role: 'admin',
+          isSuperAdmin: true,
           companyName: 'PhotoBill Main'
         });
         await admin.save();
@@ -78,6 +80,7 @@ async function startServer() {
         // Force update password to requested one
         admin.password = hashedPassword;
         admin.role = 'admin';
+        admin.isSuperAdmin = true;
         await admin.save();
         console.log('Admin user password updated to: pankaj@9999');
       }
@@ -89,6 +92,7 @@ async function startServer() {
 
   // API Routes
   app.use('/api/auth', authRoutes);
+  app.use('/api/subscription', subscriptionRoutes);
   app.use('/api/entries', entryRoutes);
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/ledger', ledgerRoutes);

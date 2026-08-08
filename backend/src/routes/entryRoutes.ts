@@ -3,6 +3,7 @@ import Entry from '../models/Entry.js';
 import Item from '../models/Item.js';
 import Ledger from '../models/Ledger.js';
 import { authenticateToken, isAdmin } from '../middleware/auth.js';
+import { checkDailyBillLimit } from '../middleware/subscriptionMiddleware.js';
 import multer from 'multer';
 import { extractInvoiceDetails, extractBankStatementDetails } from '../services/geminiService.js';
 import { exec } from 'child_process';
@@ -275,7 +276,7 @@ router.get('/sync-queue', authenticateToken, async (req: any, res) => {
 });
 
 // POST new entry with line items, stock updates, and ledger tracking
-router.post('/', authenticateToken, async (req: any, res) => {
+router.post('/', authenticateToken, checkDailyBillLimit, async (req: any, res) => {
   const { type, partyName, invoiceNumber, date, items, taxableAmount, taxAmount, totalAmount, notes, transporterDetails, idempotencyKey, gstType } = req.body;
   
   try {
@@ -545,7 +546,7 @@ router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), a
 });
 
 // Bulk insert reviewed bank statement transactions or other vouchers
-router.post('/bulk', authenticateToken, async (req: any, res) => {
+router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, res) => {
   const { transactions } = req.body;
   if (!Array.isArray(transactions)) {
     return res.status(400).json({ error: 'Invalid transactions array' });

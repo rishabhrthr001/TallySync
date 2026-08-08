@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Plus, Trash2, Save, Send, Printer, User, CreditCard, Upload, CheckCircle2, ExternalLink, Camera } from 'lucide-react';
+import { Plus, Trash2, Save, Send, Printer, User, CreditCard, Upload, CheckCircle2, ExternalLink, Camera, Lock, Check, Crown } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useNavigate } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
@@ -36,6 +36,7 @@ const CreateEntry: React.FC = () => {
   const [isRecognitionOpen, setIsRecognitionOpen] = useState(false);
   const [activeRecognitionIndex, setActiveRecognitionIndex] = useState<number | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState(false);
   const [reviewData, setReviewData] = useState<any>(null);
   const [existingParties, setExistingParties] = useState<any[]>([]);
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
@@ -214,7 +215,10 @@ const CreateEntry: React.FC = () => {
       setNotes('');
       setTimeout(() => setShowSuccess(false), 5000);
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Failed to save entry', 'error');
+      if (err.response?.data?.error === 'DAILY_BILL_LIMIT_EXCEEDED' || err.response?.status === 403) {
+        setShowLimitModal(true);
+      }
+      showToast(err.response?.data?.message || err.response?.data?.error || 'Failed to save entry', 'error');
     } finally {
       setLoading(false);
     }
@@ -265,7 +269,10 @@ const CreateEntry: React.FC = () => {
       setNotes('');
       setTimeout(() => setShowSuccess(false), 5000);
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Failed to save entry', 'error');
+      if (err.response?.data?.error === 'DAILY_BILL_LIMIT_EXCEEDED' || err.response?.status === 403) {
+        setShowLimitModal(true);
+      }
+      showToast(err.response?.data?.message || err.response?.data?.error || 'Failed to save entry', 'error');
     } finally {
       setLoading(false);
     }
@@ -617,18 +624,28 @@ const CreateEntry: React.FC = () => {
       {/* Success Notification */}
       {showSuccess && (
         <div className="fixed top-4 left-4 right-4 sm:top-8 sm:right-8 sm:left-auto sm:w-auto z-[110] animate-slide-in">
-          <div className="bg-emerald-500 text-white p-6 rounded-[2rem] shadow-2xl shadow-emerald-200/50 flex items-center gap-4 border border-emerald-400">
+          <div className="bg-emerald-600 text-white p-6 rounded-[2rem] shadow-2xl shadow-emerald-200/50 flex items-center gap-4 border border-emerald-400">
             <div className="bg-white/20 p-2 rounded-full shadow-inner">
               <CheckCircle2 className="h-6 w-6 stroke-[3]" />
             </div>
             <div>
               <p className="font-black text-lg leading-tight">Bill Saved Successfully!</p>
-              <button 
-                onClick={() => navigate('/entries')}
-                className="text-emerald-100 text-xs font-bold flex items-center gap-1 hover:text-white transition-colors mt-0.5"
-              >
-                View in History <ExternalLink className="h-3 w-3" />
-              </button>
+              <div className="flex items-center gap-3 mt-1.5">
+                <button 
+                  onClick={() => navigate('/entries')}
+                  className="text-emerald-100 text-xs font-bold flex items-center gap-1 hover:text-white transition-colors"
+                >
+                  View History <ExternalLink className="h-3 w-3" />
+                </button>
+                <span className="text-emerald-300 font-bold">•</span>
+                <button
+                  type="button"
+                  onClick={() => window.open('https://ewaybillgst.gov.in/', '_blank')}
+                  className="bg-white text-emerald-800 px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md hover:bg-emerald-50 transition-all cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Generate E-Way Bill
+                </button>
+              </div>
             </div>
             <button onClick={() => setShowSuccess(false)} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
               <Plus className="h-5 w-5 rotate-45" />
@@ -1044,6 +1061,67 @@ const CreateEntry: React.FC = () => {
           }
         }}
       />
+
+      {/* Free Tier 5-Bill Daily Limit Exceeded Modal */}
+      {showLimitModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl border border-slate-100 text-center relative overflow-hidden">
+            <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-3xl flex items-center justify-center mx-auto mb-4 border border-rose-100 shadow-sm">
+              <Lock className="w-8 h-8 stroke-[2.5]" />
+            </div>
+            
+            <span className="px-3 py-1 bg-amber-100 text-amber-800 text-[10px] font-black uppercase rounded-full tracking-wider border border-amber-200">
+              Free Tier Daily Cap (5/5 Bills Used)
+            </span>
+
+            <h3 className="text-2xl font-black text-slate-900 mt-3 leading-tight">
+              Daily Limit Reached!
+            </h3>
+
+            <p className="text-slate-500 text-xs sm:text-sm font-semibold mt-2 max-w-sm mx-auto leading-relaxed">
+              Accounts on the Free Tier can cut up to <span className="text-slate-900 font-extrabold">5 bills per day</span>. Upgrade to Pro Package or contact Super Admin Pankaj for a 30-Day Free Trial.
+            </p>
+
+            {/* Package Offer Box */}
+            <div className="my-6 p-5 bg-gradient-to-tr from-indigo-900 via-indigo-800 to-slate-900 text-white rounded-3xl text-left shadow-xl border border-indigo-500/30">
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-xs font-black uppercase tracking-widest text-indigo-300">Pro Package</span>
+                <span className="text-2xl font-black font-mono text-emerald-400">₹299 <span className="text-xs font-normal text-slate-300">/ month</span></span>
+              </div>
+              <ul className="space-y-2 text-xs text-slate-200 font-medium">
+                <li className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" /> Unlimited Daily Bill Creation
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" /> Govt E-Way Bill Direct Redirect Portal
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" /> Tally ERP Real-time Synchronization
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" /> AI Product Package & PDF Parser
+                </li>
+              </ul>
+            </div>
+
+            <div className="space-y-3">
+              <a
+                href="mailto:pankaj@photoBill.com?subject=30-Day%20Trial%20/%20Pro%20Upgrade%20Request"
+                className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
+              >
+                Contact Pankaj (Super Admin) for 30-Day Trial
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowLimitModal(false)}
+                className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-2xl text-xs uppercase tracking-wider transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 };

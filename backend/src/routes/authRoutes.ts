@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import { authenticateToken, isAdmin } from '../middleware/auth.js';
+import { getUserSubscriptionInfo, getTodayBillCount, isPankajSuperAdmin } from '../middleware/subscriptionMiddleware.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-tally-key-123';
@@ -39,13 +40,24 @@ router.post('/login', async (req, res) => {
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
+
+  const isSuper = isPankajSuperAdmin(user);
+  if (isSuper && !user.isSuperAdmin) {
+    user.isSuperAdmin = true;
+    await user.save();
+  }
+
+  const todayCount = await getTodayBillCount(user._id.toString(), user.companyName);
+  const subInfo = getUserSubscriptionInfo(user, todayCount);
+
   const token = jwt.sign(
     { 
       id: user._id, 
       email: user.email, 
       role: user.role, 
       name: user.name,
-      companyName: user.companyName 
+      companyName: user.companyName,
+      isSuperAdmin: isSuper
     },
     JWT_SECRET,
     { expiresIn: '24h' }
@@ -66,7 +78,9 @@ router.post('/login', async (req, res) => {
       email: user.email, 
       role: user.role, 
       name: user.name,
-      companyName: user.companyName 
+      companyName: user.companyName,
+      isSuperAdmin: isSuper,
+      subscription: subInfo
     } 
   });
 });
@@ -80,8 +94,29 @@ router.post('/logout', (req, res) => {
   res.json({ message: 'Logged out successfully' });
 });
 
-router.get('/me', authenticateToken, (req: any, res) => {
-  res.json(req.user);
+router.get('/me', authenticateToken, async (req: any, res) => {
+  try {
+    const userDoc = await User.findById(req.user.id);
+    if (!userDoc) {
+      return res.json(req.user);
+    }
+
+    const isSuper = isPankajSuperAdmin(userDoc);
+    const todayCount = await getTodayBillCount(userDoc._id.toString(), userDoc.companyName);
+    const subInfo = getUserSubscriptionInfo(userDoc, todayCount);
+
+    res.json({
+      id: userDoc._id,
+      email: userDoc.email,
+      role: userDoc.role,
+      name: userDoc.name,
+      companyName: userDoc.companyName,
+      isSuperAdmin: isSuper,
+      subscription: subInfo
+    });
+  } catch (err) {
+    res.json(req.user);
+  }
 });
 
 export default router;

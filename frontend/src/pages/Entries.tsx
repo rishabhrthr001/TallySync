@@ -85,6 +85,14 @@ const Entries: React.FC = () => {
           <p className="text-slate-400 text-sm font-semibold mt-0.5">Reprint generated bills and monitor sync states</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => window.open('https://ewaybillgst.gov.in/', '_blank')}
+            className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-xs uppercase tracking-wider shadow-md flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <ExternalLink className="w-4 h-4 text-emerald-400" />
+            E-Way Bill Portal
+          </button>
           <button 
             onClick={fetchEntries} 
             className="p-3 text-slate-500 hover:text-indigo-600 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
@@ -99,66 +107,61 @@ const Entries: React.FC = () => {
         {/* Filters Header */}
         <div className="p-5 border-b border-slate-150 bg-slate-50/50 flex flex-col lg:flex-row gap-4 items-center">
           <div className="relative flex-1 w-full">
-            <Search className="absolute left-4 top-3.5 h-4.5 w-4.5 text-slate-400" />
+            <Search className="absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Search party name or invoice reference..." 
+              placeholder="Search by Party Name or Invoice Ref..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm placeholder:text-slate-350"
+              className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/80 rounded-2xl text-xs font-semibold text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 shadow-xs"
             />
           </div>
-          <div className="flex gap-3 w-full lg:w-auto overflow-x-auto">
-            <div className="relative flex items-center border border-slate-200 bg-white rounded-2xl shadow-sm px-4 focus-within:ring-4 focus-within:ring-indigo-50 focus-within:border-indigo-400 transition-all">
-              <span className="text-[10px] font-black text-slate-400 uppercase mr-3">From</span>
+
+          <div className="flex items-center gap-3 w-full lg:w-auto">
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 border border-slate-200/80 rounded-2xl shadow-xs text-xs font-semibold text-slate-600 w-full sm:w-auto">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <span>From</span>
               <input 
                 type="date" 
-                value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                className="py-2.5 bg-transparent text-sm font-bold border-none outline-none text-slate-700"
+                value={dateFrom} 
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="bg-transparent outline-none font-mono text-slate-800"
               />
             </div>
-            <div className="relative flex items-center border border-slate-200 bg-white rounded-2xl shadow-sm px-4 focus-within:ring-4 focus-within:ring-indigo-50 focus-within:border-indigo-400 transition-all">
-              <span className="text-[10px] font-black text-slate-400 uppercase mr-3">To</span>
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 border border-slate-200/80 rounded-2xl shadow-xs text-xs font-semibold text-slate-600 w-full sm:w-auto">
+              <span>To</span>
               <input 
                 type="date" 
-                value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                className="py-2.5 bg-transparent text-sm font-bold border-none outline-none text-slate-700"
+                value={dateTo} 
+                onChange={(e) => setDateTo(e.target.value)}
+                className="bg-transparent outline-none font-mono text-slate-800"
               />
             </div>
           </div>
         </div>
 
-        {/* Desktop Table View */}
-        <div className="hidden md:block overflow-x-auto min-h-[300px]">
-          <table className="w-full text-left">
+        {/* Table View */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/50 text-slate-400 text-[10px] font-black uppercase tracking-widest border-b border-slate-150">
-                <th className="px-8 py-5">Invoice Reference</th>
-                <th className="px-8 py-5">Party Details</th>
-                <th className="px-8 py-5 text-center">Treatment</th>
-                <th className="px-8 py-5 text-center">Sync Status</th>
-                <th className="px-8 py-5 text-right">Grand Total</th>
-                <th className="px-8 py-5 text-right">Actions</th>
+              <tr className="border-b border-slate-150 bg-slate-50/70 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                <th className="py-4 px-6">Voucher / Date</th>
+                <th className="py-4 px-6">Party Name</th>
+                <th className="py-4 px-6">Total Amount</th>
+                <th className="py-4 px-6">Sync Status</th>
+                <th className="py-4 px-6 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 text-sm">
               <AnimatePresence>
                 {filteredEntries.map((e, idx) => (
                   <motion.tr 
                     key={e._id}
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.03 }}
-                    className="group hover:bg-slate-50/40 transition-all font-medium text-slate-700 border-b border-slate-100"
+                    transition={{ delay: idx * 0.02 }}
+                    className="hover:bg-indigo-50/30 transition-colors group"
                   >
-                    <td className="px-8 py-5">
-                      <div className="text-sm font-black text-slate-900 leading-tight mb-1">
-                        {e.invoiceNumber || 'NO-REF'}
-                      </div>
-                      <div className="text-[10px] font-bold text-slate-400 font-mono tracking-wider">
-                        {e.date}
-                      </div>
-                    </td>
                     <td className="px-8 py-5">
                       <div className="text-sm font-black text-slate-800 leading-tight">{e.partyName}</div>
                       {e.notes && <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5">{e.notes}</div>}

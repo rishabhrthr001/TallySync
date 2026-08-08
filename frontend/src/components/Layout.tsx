@@ -106,8 +106,25 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               {user?.name?.[0] || 'U'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-slate-900 truncate leading-tight">{user?.name}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs font-bold text-slate-900 truncate leading-tight">{user?.name}</p>
+              </div>
               <p className="text-[10px] text-slate-400 truncate mt-0.5 font-medium">{user?.companyName || user?.role}</p>
+              <div className="mt-1">
+                {user?.isSuperAdmin || user?.subscription?.plan === 'superadmin' ? (
+                  <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-black uppercase rounded-md bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
+                    👑 Super Admin (Pankaj)
+                  </span>
+                ) : user?.subscription?.isUnlimited ? (
+                  <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-black uppercase rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs">
+                    ⚡ {user.subscription?.plan === 'pro' ? 'Pro ₹299/mo' : `${user.subscription?.daysLeft || 30}d Trial`}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-black uppercase rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
+                    📊 Free: {user?.subscription?.billsCreatedToday ?? 0}/5 Today
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <button
