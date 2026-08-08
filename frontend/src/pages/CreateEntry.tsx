@@ -104,6 +104,15 @@ const CreateEntry: React.FC = () => {
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>, docType: 'sales' | 'purchase') => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const isProOrTrial = user?.isSuperAdmin || user?.subscription?.isUnlimited;
+    if (!isProOrTrial) {
+      showToast('🔒 PDF Bill Parsing is a Pro feature (₹299/mo). Upgrade to Pro or contact Pankaj for a 30-Day Free Trial!', 'error');
+      setShowProModal(true);
+      e.target.value = '';
+      return;
+    }
+
     await processDocumentUpload(file, docType);
     e.target.value = '';
   };
@@ -453,6 +462,12 @@ const CreateEntry: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => {
+                          const isProOrTrial = user?.isSuperAdmin || user?.subscription?.isUnlimited;
+                          if (!isProOrTrial) {
+                            showToast('🔒 AI Product Camera Scanner is a Pro feature (₹299/mo). Upgrade to Pro or contact Pankaj for a 30-Day Free Trial!', 'error');
+                            setShowProModal(true);
+                            return;
+                          }
                           setActiveRecognitionIndex(index);
                           setIsRecognitionOpen(true);
                         }}

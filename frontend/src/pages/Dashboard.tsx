@@ -54,6 +54,7 @@ const Dashboard: React.FC = () => {
 
     const isProOrTrial = user?.isSuperAdmin || user?.subscription?.isUnlimited;
     if (!isProOrTrial) {
+      showToast('🔒 AI Bank Statement Parsing is a Pro feature (₹299/mo). Upgrade to Pro or contact Pankaj for a 30-Day Free Trial!', 'error');
       setShowProModal(true);
       return;
     }

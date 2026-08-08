@@ -177,6 +177,16 @@ export default function Admin() {
     }
   };
 
+  const handleSelectPlanToggle = async (userId: string, newPlan: string) => {
+    if (newPlan === 'pro') {
+      await handleUpgradePro(userId);
+    } else if (newPlan === 'trial') {
+      await handleGrantTrial(userId);
+    } else {
+      await handleResetFree(userId);
+    }
+  };
+
   const updateStatus = async (id: string, status: string) => {
     setProcessingId(id);
     try {
@@ -613,30 +623,21 @@ export default function Admin() {
                     {/* Subscription Quick Controls for Pankaj Super Admin */}
                     {!client.isSuperAdmin && !(client.email && client.email.toLowerCase().includes('pankaj')) && (
                       <div className="mt-4 pt-3 border-t border-slate-100/80 bg-slate-50/50 p-3 rounded-2xl space-y-2">
-                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Pankaj Subscription Controls</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleGrantTrial(client._id)}
-                            className="px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-600 hover:text-white rounded-xl text-[10px] font-black uppercase transition-colors cursor-pointer"
-                          >
-                            + 30-Day Trial
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleUpgradePro(client._id)}
-                            className="px-2.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-600 hover:text-white rounded-xl text-[10px] font-black uppercase transition-colors cursor-pointer"
-                          >
-                            Pro ₹299/mo
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleResetFree(client._id)}
-                            className="px-2.5 py-1.5 bg-slate-100 border border-slate-200 text-slate-600 hover:bg-slate-700 hover:text-white rounded-xl text-[10px] font-black uppercase transition-colors cursor-pointer"
-                          >
-                            Free (5/day)
-                          </button>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Firm Pro Status Dropdown</span>
+                          <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">Pankaj Control</span>
                         </div>
+
+                        <select
+                          value={client.subscription?.plan || 'free'}
+                          onChange={(e) => handleSelectPlanToggle(client._id, e.target.value)}
+                          disabled={processingId === client._id}
+                          className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer shadow-2xs"
+                        >
+                          <option value="free">📊 Normal / Free User (5 Bills/Day Limit)</option>
+                          <option value="trial">🎁 30-Day Free Trial (Unlimited)</option>
+                          <option value="pro">⚡ Pro User Package (₹299/mo Unlimited)</option>
+                        </select>
                       </div>
                     )}
                   </div>
