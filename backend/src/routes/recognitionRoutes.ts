@@ -1,12 +1,13 @@
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { checkProFeatureAccess } from '../middleware/subscriptionMiddleware.js';
 import { searchProductsByImage } from '../services/recognitionService.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const router = express.Router();
 
 // Search products by captured image / upload using Cloudinary & Gemini Vision
-router.post('/search', authenticateToken, async (req: any, res) => {
+router.post('/search', authenticateToken, checkProFeatureAccess, async (req: any, res) => {
   try {
     const { image } = req.body;
     if (!image) {

@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/format';
 import { useToast } from '../contexts/ToastContext';
 import ProductRecognitionModal from '../components/ProductRecognitionModal';
+import ProUpgradeModal from '../components/ProUpgradeModal';
 
 interface ItemRow {
   name: string;
@@ -37,6 +38,7 @@ const CreateEntry: React.FC = () => {
   const [activeRecognitionIndex, setActiveRecognitionIndex] = useState<number | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
+  const [showProModal, setShowProModal] = useState(false);
   const [reviewData, setReviewData] = useState<any>(null);
   const [existingParties, setExistingParties] = useState<any[]>([]);
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
@@ -331,68 +333,74 @@ const CreateEntry: React.FC = () => {
                   onChange={(e) => setPartyName(e.target.value)}
                   onFocus={() => setPartyDropdownOpen(true)}
                   onBlur={() => setTimeout(() => setPartyDropdownOpen(false), 200)}
-                  placeholder="Cash / Search Party Name..."
-                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50/50 border border-slate-200 rounded-2xl font-bold text-slate-800 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm placeholder:text-slate-350"
+                  placeholder="Customer or Supplier Name..."
+                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 focus:bg-white focus:border-indigo-500 outline-none transition-all"
                 />
-                {partyDropdownOpen && (
-                  <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl max-h-60 overflow-y-auto overflow-x-hidden">
-                    {[{partyName: 'Cash', gstin: ''}, ...existingParties]
-                      .filter(p => (p.partyName || p.name || '').toLowerCase().includes((partyName || '').toLowerCase()))
-                      .map((p, i) => {
-                        const nameVal = p.partyName || p.name || '';
-                        return (
-                          <button
-                            type="button"
-                            key={i}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => {
-                              setPartyName(nameVal);
-                              setPartyDropdownOpen(false);
-                              if (p.gstin) setPartyGstin(p.gstin);
-                            }}
-                            className="w-full text-left px-4 py-3 hover:bg-indigo-50 transition-colors border-b border-slate-50 last:border-0"
-                          >
-                            <span className="font-bold text-slate-700">{nameVal}</span>
-                            {p.gstin && <span className="block text-[10px] font-mono text-slate-400 mt-0.5">{p.gstin}</span>}
-                          </button>
-                        );
-                      })}
+
+                {partyDropdownOpen && existingParties.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl max-h-56 overflow-y-auto">
+                    {existingParties
+                      .filter(p => (p.partyName || p.name || '').toLowerCase().includes(partyName.toLowerCase()))
+                      .map((p, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setPartyName(p.partyName || p.name);
+                            if (p.gstin) setPartyGstin(p.gstin);
+                            setPartyDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-50 last:border-0 transition-colors flex justify-between items-center"
+                        >
+                          <span className="font-bold text-slate-800 text-sm">{p.partyName || p.name}</span>
+                          {p.gstin && <span className="text-[10px] text-slate-400 font-mono">{p.gstin}</span>}
+                        </button>
+                      ))}
                   </div>
                 )}
               </div>
             </div>
             <div className="space-y-1.5 md:col-span-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Party GSTIN</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Party GSTIN (Optional)</label>
               <div className="relative">
-                <CreditCard className="absolute left-4 top-3.5 h-5 w-5 text-indigo-400" />
+                <CreditCard className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
                 <input 
                   type="text" 
                   value={partyGstin} 
                   onChange={(e) => setPartyGstin(e.target.value.toUpperCase())}
-                  placeholder="GSTIN (Optional)"
-                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50/50 border border-slate-200 rounded-2xl font-bold text-slate-800 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm placeholder:text-slate-350"
+                  placeholder="27AAAAA0000A1Z5"
+                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono font-bold text-slate-800 focus:bg-white focus:border-indigo-500 outline-none transition-all uppercase"
                 />
               </div>
             </div>
-            <div className="space-y-1.5 md:col-span-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Invoice # Reference</label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Invoice / Voucher Ref #</label>
               <input 
                 required
                 type="text" 
                 value={invoiceNumber} 
                 onChange={(e) => setInvoiceNumber(e.target.value)}
-                placeholder="INV-001"
-                className="w-full px-4 py-3.5 bg-slate-50/50 border border-slate-200 rounded-2xl font-bold text-slate-800 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm font-mono text-sm"
+                className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono font-bold text-slate-800 focus:bg-white focus:border-indigo-500 outline-none transition-all"
               />
             </div>
-            <div className="space-y-1.5 md:col-span-2">
+
+            <div className="space-y-1.5">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Date</label>
               <input 
-                required type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="w-full px-4 py-3.5 bg-slate-50/50 border border-slate-200 rounded-2xl font-bold text-slate-800 focus:bg-white focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm"
+                required
+                type="date" 
+                value={date} 
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 focus:bg-white focus:border-indigo-500 outline-none transition-all"
               />
             </div>
-            <div className="space-y-1.5 md:col-span-2">
+          </div>
+
+          <div className="space-y-1.5">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">GST Treatment</label>
               <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200/50">
                 <button 
@@ -411,7 +419,6 @@ const CreateEntry: React.FC = () => {
                 </button>
               </div>
             </div>
-          </div>
 
           <div className="bg-slate-50 rounded-2xl border border-slate-200/70 overflow-hidden">
             <div className="hidden md:grid grid-cols-12 gap-4 p-4 border-b border-slate-200 bg-slate-100/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -1122,6 +1129,8 @@ const CreateEntry: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ProUpgradeModal isOpen={showProModal} onClose={() => setShowProModal(false)} />
     </Layout>
   );
 };

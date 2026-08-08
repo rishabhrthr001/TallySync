@@ -3,7 +3,7 @@ import Entry from '../models/Entry.js';
 import Item from '../models/Item.js';
 import Ledger from '../models/Ledger.js';
 import { authenticateToken, isAdmin } from '../middleware/auth.js';
-import { checkDailyBillLimit } from '../middleware/subscriptionMiddleware.js';
+import { checkDailyBillLimit, checkProFeatureAccess } from '../middleware/subscriptionMiddleware.js';
 import multer from 'multer';
 import { extractInvoiceDetails, extractBankStatementDetails } from '../services/geminiService.js';
 import { exec } from 'child_process';
@@ -203,8 +203,8 @@ async function parseAndExtractInvoice(
   };
 }
 
-// GET all entries for user/admin
-router.post('/upload-pdf', authenticateToken, upload.single('pdf'), async (req: any, res) => {
+// POST upload-pdf route
+router.post('/upload-pdf', authenticateToken, checkProFeatureAccess, upload.single('pdf'), async (req: any, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -476,7 +476,7 @@ async function decryptPdf(buffer: Buffer, password?: string): Promise<Buffer> {
 }
 
 // Route to accept bank statement (PDF, etc.) and return parsed transactions without saving them yet
-router.post('/upload-bank-statement', authenticateToken, upload.single('pdf'), async (req: any, res) => {
+router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, upload.single('pdf'), async (req: any, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });

@@ -14,6 +14,7 @@ import { formatCurrency } from '../utils/format';
 import { useToast } from '../contexts/ToastContext';
 import PrintableInvoice from '../components/PrintableInvoice';
 import { useReactToPrint } from 'react-to-print';
+import ProUpgradeModal from '../components/ProUpgradeModal';
 
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
@@ -37,6 +38,7 @@ const Dashboard: React.FC = () => {
   const [tempTransactions, setTempTransactions] = useState<any[]>([]);
   const [syncSaving, setSyncSaving] = useState(false);
   const [bankPassword, setBankPassword] = useState<string>('');
+  const [showProModal, setShowProModal] = useState(false);
 
   const updateTempTxn = (index: number, field: string, value: any) => {
     setTempTransactions(prev => prev.map((t, idx) => idx === index ? { ...t, [field]: value } : t));
@@ -49,6 +51,12 @@ const Dashboard: React.FC = () => {
   const handleBankUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bankFile) return;
+
+    const isProOrTrial = user?.isSuperAdmin || user?.subscription?.isUnlimited;
+    if (!isProOrTrial) {
+      setShowProModal(true);
+      return;
+    }
 
     setParsingBank(true);
     setBankParseResult(null);
@@ -827,6 +835,8 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ProUpgradeModal isOpen={showProModal} onClose={() => setShowProModal(false)} />
     </Layout>
   );
 };

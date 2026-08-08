@@ -15,16 +15,19 @@ import {
   User,
   ChevronRight,
   MoreHorizontal,
-  Plus
+  Plus,
+  Zap
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
+import ProUpgradeModal from './ProUpgradeModal';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showProModal, setShowProModal] = useState(false);
 
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
@@ -106,6 +109,25 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </nav>
 
         <div className="p-4 border-t border-slate-100/80 bg-white/40 shrink-0">
+          {user?.role !== 'admin' && (
+            <button
+              type="button"
+              onClick={() => setShowProModal(true)}
+              className="w-full mb-3 p-3 bg-gradient-to-r from-indigo-600 via-violet-600 to-indigo-700 hover:from-indigo-700 hover:to-violet-700 text-white rounded-2xl shadow-md shadow-indigo-500/20 flex items-center justify-between group transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Zap className="w-4 h-4 text-emerald-300 fill-emerald-300" />
+                </div>
+                <div className="text-left">
+                  <div className="text-xs font-black uppercase tracking-wider leading-none">Upgrade to Pro</div>
+                  <div className="text-[9px] text-indigo-200 font-bold mt-0.5 font-mono">₹299/mo • Free Trial</div>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-white/70 group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          )}
+
           <div className="flex items-center space-x-3 px-3 py-2.5 mb-3 rounded-xl bg-slate-50/50 border border-slate-100">
             <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-500 flex items-center justify-center text-white font-bold uppercase shadow-sm">
               {user?.name?.[0] || 'U'}
@@ -291,6 +313,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <p className="text-slate-400 text-xs font-semibold">© {new Date().getFullYear()} PhotoBill. All rights reserved.</p>
         </footer>
       </main>
+
+      <ProUpgradeModal isOpen={showProModal} onClose={() => setShowProModal(false)} />
     </div>
   );
 };

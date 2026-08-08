@@ -129,3 +129,32 @@ export async function checkDailyBillLimit(req: any, res: Response, next: NextFun
     next();
   }
 }
+
+export async function checkProFeatureAccess(req: any, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const userDoc = await User.findById(userId);
+    if (!userDoc) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const subInfo = getUserSubscriptionInfo(userDoc);
+    if (!subInfo.isUnlimited) {
+      return res.status(403).json({
+        error: 'PRO_FEATURE_LOCKED',
+        message: 'This feature (AI Product Camera Scanner & PDF/Bank Statement Parser) requires a Pro Package (₹299/mo) or 30-Day Free Trial. Contact Pankaj (Super Admin) to unlock!',
+        subInfo
+      });
+    }
+
+    req.subInfo = subInfo;
+    next();
+  } catch (err: any) {
+    console.error('Error checking pro feature access:', err);
+    next();
+  }
+}
