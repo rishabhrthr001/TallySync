@@ -588,7 +588,7 @@ export default function Admin() {
                       <div>
                         {client.isSuperAdmin || (client.email && client.email.toLowerCase().includes('pankaj')) ? (
                           <span className="px-3 py-1 bg-amber-100 border border-amber-200 rounded-full text-[9px] font-black uppercase tracking-wider text-amber-800">
-                            👑 Super Admin (Pankaj)
+                            👑 Super Admin
                           </span>
                         ) : client.subscription?.isUnlimited ? (
                           <span className="px-3 py-1 bg-emerald-100 border border-emerald-200 rounded-full text-[9px] font-black uppercase tracking-wider text-emerald-800">
@@ -620,12 +620,12 @@ export default function Admin() {
                       </div>
                     </div>
 
-                    {/* Subscription Quick Controls for Pankaj Super Admin */}
+                    {/* Subscription Quick Controls for Super Admin */}
                     {!client.isSuperAdmin && !(client.email && client.email.toLowerCase().includes('pankaj')) && (
                       <div className="mt-4 pt-3 border-t border-slate-100/80 bg-slate-50/50 p-3 rounded-2xl space-y-2">
                         <div className="flex justify-between items-center">
                           <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Firm Pro Status Dropdown</span>
-                          <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">Pankaj Control</span>
+                          <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">Admin Control</span>
                         </div>
 
                         <select

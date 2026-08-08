@@ -10,7 +10,7 @@ export const isSuperAdminCheck = async (req: any, res: express.Response, next: e
   if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
   const userDoc = await User.findById(req.user.id);
   if (!userDoc || (!isPankajSuperAdmin(userDoc) && userDoc.role !== 'admin')) {
-    return res.status(403).json({ error: 'Super Admin access required (Pankaj only)' });
+    return res.status(403).json({ error: 'Super Admin access required' });
   }
   next();
 };

@@ -140,7 +140,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               <div className="mt-1">
                 {user?.isSuperAdmin || user?.subscription?.plan === 'superadmin' ? (
                   <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-black uppercase rounded-md bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
-                    👑 Super Admin (Pankaj)
+                    👑 Super Admin
                   </span>
                 ) : user?.subscription?.isUnlimited ? (
                   <span className="inline-flex items-center px-2 py-0.5 text-[9px] font-black uppercase rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs">
