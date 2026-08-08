@@ -109,7 +109,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </nav>
 
         <div className="p-4 border-t border-slate-100/80 bg-white/40 shrink-0">
-          {user?.role !== 'admin' && (
+          {user?.role !== 'admin' && !user?.subscription?.isUnlimited && (
             <button
               type="button"
               onClick={() => setShowProModal(true)}

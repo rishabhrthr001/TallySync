@@ -84,6 +84,23 @@ async function startServer() {
         await admin.save();
         console.log('Admin user password updated to: pankaj@9999');
       }
+
+      // Reset all non-superadmin client accounts to free tier (trial locked until explicitly started by user)
+      await User.updateMany(
+        { email: { $ne: 'pankaj@photoBill.com' }, isSuperAdmin: { $ne: true } },
+        {
+          $set: {
+            'subscription.plan': 'free',
+            'subscription.trialStartDate': null,
+            'subscription.trialEndDate': null,
+            'subscription.proStartDate': null,
+            'subscription.proEndDate': null,
+            'subscription.hasClaimedTrial': false,
+            'subscription.status': 'active'
+          }
+        }
+      );
+      console.log('Reset non-superadmin client accounts to Free Tier (Trial locked until started)');
     } catch (error) {
       console.error('Error seeding admin:', error);
     }

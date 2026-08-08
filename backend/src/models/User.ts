@@ -11,9 +11,9 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   address: { type: String, default: '' },
   subscription: {
-    plan: { type: String, enum: ['free', 'trial', 'pro'], default: 'trial' },
-    trialStartDate: { type: Date, default: Date.now },
-    trialEndDate: { type: Date, default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) },
+    plan: { type: String, enum: ['free', 'trial', 'pro'], default: 'free' },
+    trialStartDate: { type: Date, default: null },
+    trialEndDate: { type: Date, default: null },
     proStartDate: { type: Date, default: null },
     proEndDate: { type: Date, default: null },
     hasClaimedTrial: { type: Boolean, default: false },
