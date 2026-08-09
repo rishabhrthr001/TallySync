@@ -4,10 +4,8 @@ import Entry from '../models/Entry.js';
 
 export function isPankajSuperAdmin(user: any): boolean {
   if (!user) return false;
-  if (user.isSuperAdmin === true) return true;
   const email = (user.email || '').toLowerCase();
-  const name = (user.name || '').toLowerCase();
-  return email.includes('pankaj') || name.includes('pankaj');
+  return email === 'pankaj@photobill.com';
 }
 
 export function getUserSubscriptionInfo(userDoc: any, todayBillCount: number = 0) {
