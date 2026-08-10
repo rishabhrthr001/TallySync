@@ -76,16 +76,18 @@ body {
 
 @media print {
   @page {
-    size: auto;
-    margin: 10mm;
+    size: A4 portrait;
+    margin: 5mm;
   }
 
   html, body {
     background: white !important;
     color: black !important;
     height: auto !important;
-    min-height: 100% !important;
-    overflow: visible !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   /* Hide modal overlays, sidebars, headers, and UI controls */
@@ -94,8 +96,7 @@ body {
   nav,
   aside,
   button,
-  .backdrop-blur-md,
-  [role="dialog"] > div:first-child {
+  .backdrop-blur-md {
     display: none !important;
   }
 
@@ -107,17 +108,16 @@ body {
 
   #printable-invoice-root {
     display: block !important;
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
     width: 100% !important;
     height: auto !important;
-    overflow: visible !important;
+    overflow: hidden !important;
     background: white !important;
     color: black !important;
     padding: 0 !important;
     margin: 0 !important;
-    z-index: 99999999 !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 }
 
