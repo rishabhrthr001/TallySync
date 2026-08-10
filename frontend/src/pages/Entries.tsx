@@ -24,6 +24,10 @@ const Entries: React.FC = () => {
       setSearchTerm(q);
     }
   }, [searchParams]);
+
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
   const defaultPrintData = {
     type: 'sales',
     partyName: 'Customer',
