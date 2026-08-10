@@ -24,26 +24,64 @@ const Entries: React.FC = () => {
       setSearchTerm(q);
     }
   }, [searchParams]);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [printData, setPrintData] = useState<any>(null);
+  const defaultPrintData = {
+    type: 'sales',
+    partyName: 'Customer',
+    partyGstin: '',
+    invoiceNumber: 'INV-000',
+    date: new Date().toISOString().split('T')[0],
+    items: [],
+    taxableAmount: 0,
+    taxAmount: 0,
+    totalAmount: 0,
+    gstType: 'cgst-sgst',
+    notes: '',
+    companyName: user?.companyName || 'Company'
+  };
+
+  const [printData, setPrintData] = useState<any>(defaultPrintData);
 
   const printRef = useRef<HTMLDivElement>(null);
 
   const handlePrintAction = useReactToPrint({
-    contentRef: printRef,
-    onAfterPrint: () => setPrintData(null)
+    contentRef: printRef
   });
 
   useEffect(() => {
     fetchEntries();
   }, []);
 
-  useEffect(() => {
-    if (printData && printRef.current) {
-      handlePrintAction();
-    }
-  }, [printData, handlePrintAction]);
+  const triggerPrint = (entry: any) => {
+    const itemsArr = Array.isArray(entry.items) && entry.items.length > 0
+      ? entry.items
+      : [{ name: entry.partyName ? `Voucher - ${entry.partyName}` : 'Bill Item', quantity: 1, rate: entry.totalAmount || 0, amount: entry.totalAmount || 0, gst: 18 }];
+
+    const tot = Number(entry.totalAmount || 0);
+    const tax = Number((tot * 0.18 / 1.18).toFixed(2));
+    const taxVal = Number((tot - tax).toFixed(2));
+
+    const formatted = {
+      type: entry.type || 'sales',
+      partyName: entry.partyName || 'Cash',
+      partyGstin: entry.partyGstin || '',
+      invoiceNumber: entry.invoiceNumber || `INV-${Date.now().toString().slice(-4)}`,
+      date: entry.date || (entry.createdAt ? new Date(entry.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+      items: itemsArr,
+      taxableAmount: entry.taxableAmount || taxVal,
+      taxAmount: entry.taxAmount || tax,
+      totalAmount: tot,
+      gstType: entry.gstType || 'cgst-sgst',
+      notes: entry.notes || '',
+      companyName: entry.companyName || user?.companyName || 'Company Name'
+    };
+
+    setPrintData(formatted);
+    setTimeout(() => {
+      if (printRef.current) {
+        handlePrintAction();
+      }
+    }, 150);
+  };
 
   const fetchEntries = async () => {
     setLoading(true);
@@ -268,7 +306,7 @@ const Entries: React.FC = () => {
                 )}
 
                 <button 
-                  onClick={() => setPrintData({ ...e, companyName: user?.companyName })}
+                  onClick={() => triggerPrint(e)}
                   className="w-full py-3 bg-slate-50 hover:bg-indigo-50 border border-slate-200 active:border-indigo-200 text-slate-700 active:text-indigo-600 font-bold text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                 >
                   <Printer className="w-4 h-4" /> Print Invoice
@@ -292,12 +330,10 @@ const Entries: React.FC = () => {
         )}
       </div>
 
-      {/* Off-screen container for react-to-print to prevent mobile fallbacks */}
-      {printData && (
-        <div className="print-container absolute top-[-9999px] left-[-9999px] print:static print:block">
-          <PrintableInvoice ref={printRef} data={printData} user={user} />
-        </div>
-      )}
+      {/* Off-screen container for react-to-print to prevent blank print fallback */}
+      <div className="print-container fixed top-[-9999px] left-[-9999px] print:static print:block pointer-events-none opacity-0 print:opacity-100">
+        <PrintableInvoice ref={printRef} data={printData} user={user} />
+      </div>
     </Layout>
   );
 };

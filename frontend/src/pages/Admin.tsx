@@ -68,6 +68,7 @@ export default function Admin() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'entries' | 'clients' | 'reports'>('entries');
+  const [firmSubView, setFirmSubView] = useState<'menu' | 'register' | 'manage' | 'logs'>('menu');
   const [selectedCompanyForReport, setSelectedCompanyForReport] = useState<User | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   
@@ -544,148 +545,228 @@ export default function Admin() {
 
       {activeTab === 'clients' && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-            <div className="relative flex-1 w-full">
-              <Search className="absolute left-4 top-3.5 h-4.5 w-4.5 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Search firm network by name, email, GSTIN..." 
-                value={clientSearchTerm}
-                onChange={(e) => setClientSearchTerm(e.target.value)}
-                className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm placeholder:text-slate-350"
-              />
-            </div>
-            <button 
-              onClick={() => {
-                setModalError('');
-                setNewClient({ name: '', email: '', password: '', companyName: '', gstin: '', phone: '', address: '' });
-                setIsModalOpen(true);
-              }}
-              className="flex items-center justify-center gap-3 px-6 py-3.5 bg-indigo-600 text-white text-xs font-bold uppercase tracking-wider rounded-2xl hover:bg-slate-900 transition-all shadow-lg shadow-indigo-500/10 active:scale-95 cursor-pointer"
+          {firmSubView !== 'menu' && (
+            <button
+              onClick={() => setFirmSubView('menu')}
+              className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-800 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all shadow-xs cursor-pointer"
             >
-              <Plus className="w-4 h-4 stroke-[2.5]" />
-              Register New Firm
+              <ArrowLeft className="w-4 h-4 text-indigo-600 stroke-[3]" />
+              <span>← Back to Firm Network Options</span>
             </button>
-          </div>
+          )}
 
-          {/* Firm cards grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <AnimatePresence>
-              {filteredClients.map((client, idx) => (
-                <motion.div 
-                  key={client._id}
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 15 }}
-                  transition={{ delay: idx * 0.02 }}
-                  className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.02)] hover:border-indigo-300 hover:shadow-lg transition-all duration-300 flex flex-col justify-between group"
+          {firmSubView === 'menu' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-black text-slate-900 tracking-tight">Firm Network Control</h3>
+                <p className="text-slate-400 text-xs font-semibold mt-0.5">Select an option below to register new firms, manage subscriptions, or inspect audit logs</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Button 1: Register New Firm */}
+                <button
+                  onClick={() => {
+                    setModalError('');
+                    setNewClient({ name: '', email: '', password: '', companyName: '', gstin: '', phone: '', address: '' });
+                    setIsModalOpen(true);
+                  }}
+                  className="p-8 bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 text-white rounded-3xl shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all text-left flex flex-col justify-between group cursor-pointer border border-indigo-500/20"
                 >
+                  <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center mb-6">
+                    <Plus className="w-7 h-7 text-white stroke-[3]" />
+                  </div>
                   <div>
-                    <div className="flex items-start justify-between mb-5">
-                      <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-lg font-black group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300 shadow-sm uppercase">
-                        {client.companyName?.[0] || client.name[0]}
-                      </div>
-                      <div>
-                        {client.isSuperAdmin || (client.email && client.email.toLowerCase().includes('pankaj')) ? (
-                          <span className="px-3 py-1 bg-amber-100 border border-amber-200 rounded-full text-[9px] font-black uppercase tracking-wider text-amber-800">
-                            👑 Super Admin
-                          </span>
-                        ) : client.subscription?.isUnlimited ? (
-                          <span className="px-3 py-1 bg-emerald-100 border border-emerald-200 rounded-full text-[9px] font-black uppercase tracking-wider text-emerald-800">
-                            ⚡ {client.subscription?.plan === 'pro' ? 'Pro ₹299/mo' : `${client.subscription?.daysLeft || 30}d Free Trial`}
-                          </span>
-                        ) : (
-                          <span className="px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-[9px] font-black uppercase tracking-wider text-indigo-700">
-                            📊 Free ({client.subscription?.billsCreatedToday ?? 0}/5 Today)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <h3 className="text-lg font-black text-slate-900 leading-snug group-hover:text-indigo-600 transition-colors">
-                      {client.companyName || 'Unmapped Firm'}
-                    </h3>
-                    <p className="text-xs text-slate-400 font-bold flex items-center gap-1.5 mt-1.5">
-                      <Building className="w-3.5 h-3.5 text-slate-355" /> {client.name} ({client.email})
+                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-200 block mb-1">Option 1</span>
+                    <h3 className="text-2xl font-black tracking-tight">Register New Firm</h3>
+                    <p className="text-xs font-semibold text-indigo-100/90 mt-2 leading-relaxed">
+                      Provision a new client company profile, credentials, GSTIN, & address.
                     </p>
-                    
-                    <div className="space-y-2.5 pt-5 border-t border-slate-100 mt-5">
-                      <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
-                        <Hash className="w-4 h-4 text-slate-350 shrink-0" />
-                        <span className="truncate">{client.gstin || 'GST Unregistered'}</span>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
-                        <Phone className="w-4 h-4 text-slate-350 shrink-0" />
-                        <span>{client.phone || 'No Phone Number'}</span>
-                      </div>
-                    </div>
+                  </div>
+                </button>
 
-                    {/* Subscription Quick Controls for Super Admin */}
-                    {!client.isSuperAdmin && !(client.email && client.email.toLowerCase().includes('pankaj')) && (
-                      <div className="mt-4 pt-3 border-t border-slate-100/80 bg-slate-50/50 p-3 rounded-2xl space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Firm Pro Status Dropdown</span>
-                          <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">Admin Control</span>
+                {/* Button 2: Manage Registered Firms & Subscriptions */}
+                <button
+                  onClick={() => setFirmSubView('manage')}
+                  className="p-8 bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 text-white rounded-3xl shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all text-left flex flex-col justify-between group cursor-pointer border border-emerald-500/20"
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center mb-6">
+                    <Users className="w-7 h-7 text-white stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-200 block mb-1">Option 2</span>
+                    <h3 className="text-2xl font-black tracking-tight">Manage Firms & Pro Status</h3>
+                    <p className="text-xs font-semibold text-emerald-100/90 mt-2 leading-relaxed">
+                      View all registered firms, toggle Pro / Free / Trial status using dropdowns, & edit profiles.
+                    </p>
+                  </div>
+                </button>
+
+                {/* Button 3: Network Audit & Logs */}
+                <button
+                  onClick={() => setFirmSubView('logs')}
+                  className="p-8 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 text-white rounded-3xl shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all text-left flex flex-col justify-between group cursor-pointer border border-slate-700/50"
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center mb-6">
+                    <Building2 className="w-7 h-7 text-white stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1">Option 3</span>
+                    <h3 className="text-2xl font-black tracking-tight">Network Audit & Logs</h3>
+                    <p className="text-xs font-semibold text-slate-300/90 mt-2 leading-relaxed">
+                      Inspect registered firm count metrics, registration timestamps, & account terminations.
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {(firmSubView === 'manage' || firmSubView === 'logs') && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                <div className="relative flex-1 w-full">
+                  <Search className="absolute left-4 top-3.5 h-4.5 w-4.5 text-slate-400" />
+                  <input 
+                    type="text" 
+                    placeholder="Search firm network by name, email, GSTIN..." 
+                    value={clientSearchTerm}
+                    onChange={(e) => setClientSearchTerm(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 focus:ring-4 focus:ring-indigo-50 focus:border-indigo-400 outline-none transition-all shadow-sm placeholder:text-slate-350"
+                  />
+                </div>
+                <button 
+                  onClick={() => {
+                    setModalError('');
+                    setNewClient({ name: '', email: '', password: '', companyName: '', gstin: '', phone: '', address: '' });
+                    setIsModalOpen(true);
+                  }}
+                  className="flex items-center justify-center gap-3 px-6 py-3.5 bg-indigo-600 text-white text-xs font-bold uppercase tracking-wider rounded-2xl hover:bg-slate-900 transition-all shadow-lg shadow-indigo-500/10 active:scale-95 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                  Register New Firm
+                </button>
+              </div>
+
+              {/* Firm cards grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <AnimatePresence>
+                  {filteredClients.map((client, idx) => (
+                    <motion.div 
+                      key={client._id}
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 15 }}
+                      transition={{ delay: idx * 0.02 }}
+                      className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.02)] hover:border-indigo-300 hover:shadow-lg transition-all duration-300 flex flex-col justify-between group"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between mb-5">
+                          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-lg font-black group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300 shadow-sm uppercase">
+                            {client.companyName?.[0] || client.name[0]}
+                          </div>
+                          <div>
+                            {client.isSuperAdmin || (client.email && client.email.toLowerCase().includes('pankaj')) ? (
+                              <span className="px-3 py-1 bg-amber-100 border border-amber-200 rounded-full text-[9px] font-black uppercase tracking-wider text-amber-800">
+                                👑 Super Admin
+                              </span>
+                            ) : client.subscription?.isUnlimited ? (
+                              <span className="px-3 py-1 bg-emerald-100 border border-emerald-200 rounded-full text-[9px] font-black uppercase tracking-wider text-emerald-800">
+                                ⚡ {client.subscription?.plan === 'pro' ? 'Pro ₹299/mo' : `${client.subscription?.daysLeft || 30}d Free Trial`}
+                              </span>
+                            ) : (
+                              <span className="px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-[9px] font-black uppercase tracking-wider text-indigo-700">
+                                📊 Free ({client.subscription?.billsCreatedToday ?? 0}/5 Today)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <h3 className="text-lg font-black text-slate-900 leading-snug group-hover:text-indigo-600 transition-colors">
+                          {client.companyName || 'Unmapped Firm'}
+                        </h3>
+                        <p className="text-xs text-slate-400 font-bold flex items-center gap-1.5 mt-1.5">
+                          <Building className="w-3.5 h-3.5 text-slate-355" /> {client.name} ({client.email})
+                        </p>
+                        
+                        <div className="space-y-2.5 pt-5 border-t border-slate-100 mt-5">
+                          <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
+                            <Hash className="w-4 h-4 text-slate-350 shrink-0" />
+                            <span className="truncate">{client.gstin || 'GST Unregistered'}</span>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
+                            <Phone className="w-4 h-4 text-slate-350 shrink-0" />
+                            <span>{client.phone || 'No Phone Number'}</span>
+                          </div>
                         </div>
 
-                        <select
-                          value={client.subscription?.plan || 'free'}
-                          onChange={(e) => handleSelectPlanToggle(client._id, e.target.value)}
-                          disabled={processingId === client._id}
-                          className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer shadow-2xs"
-                        >
-                          <option value="free">📊 Normal / Free User (5 Bills/Day Limit)</option>
-                          <option value="trial">🎁 30-Day Free Trial (Unlimited)</option>
-                          <option value="pro">⚡ Pro User Package (₹299/mo Unlimited)</option>
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-300">
-                      Added {client.createdAt ? format(new Date(client.createdAt), 'MMM yyyy') : 'N/A'}
-                    </span>
-                    <div className="flex gap-1.5">
-                      <button 
-                        onClick={() => {
-                          setSelectedCompanyForReport(client);
-                          setActiveTab('reports');
-                          setSearchParams({ tab: 'reports' });
-                        }}
-                        className="p-2 text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl transition-all"
-                        title="View sync report details"
-                      >
-                        <TrendingUp className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setModalError('');
-                          setEditingClient({ ...client });
-                        }}
-                        className="p-2 text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl transition-all"
-                        title="Edit profile"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => setClientToDelete(client)}
-                        className="p-2 text-rose-550 bg-slate-50 hover:bg-rose-50 border border-slate-100 rounded-xl transition-all"
-                        title="Terminate client instance"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
+                        {/* Subscription Quick Controls for Super Admin */}
+                        {!client.isSuperAdmin && !(client.email && client.email.toLowerCase().includes('pankaj')) && (
+                          <div className="mt-4 pt-3 border-t border-slate-100/80 bg-slate-50/50 p-3 rounded-2xl space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Firm Pro Status Dropdown</span>
+                              <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">Admin Control</span>
+                            </div>
 
-          {filteredClients.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 text-slate-400">
-              <Users className="h-14 w-14 opacity-20 mb-4" />
-              <p className="font-bold text-lg text-slate-700">No firm accounts found</p>
+                            <select
+                              value={client.subscription?.plan || 'free'}
+                              onChange={(e) => handleSelectPlanToggle(client._id, e.target.value)}
+                              disabled={processingId === client._id}
+                              className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer shadow-2xs"
+                            >
+                              <option value="free">📊 Normal / Free User (5 Bills/Day Limit)</option>
+                              <option value="trial">🎁 30-Day Free Trial (Unlimited)</option>
+                              <option value="pro">⚡ Pro User Package (₹299/mo Unlimited)</option>
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-300">
+                          Added {client.createdAt ? format(new Date(client.createdAt), 'MMM yyyy') : 'N/A'}
+                        </span>
+                        <div className="flex gap-1.5">
+                          <button 
+                            onClick={() => {
+                              setSelectedCompanyForReport(client);
+                              setActiveTab('reports');
+                              setSearchParams({ tab: 'reports' });
+                            }}
+                            className="p-2 text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl transition-all"
+                            title="View sync report details"
+                          >
+                            <TrendingUp className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setModalError('');
+                              setEditingClient({ ...client });
+                            }}
+                            className="p-2 text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-100 rounded-xl transition-all"
+                            title="Edit profile"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => setClientToDelete(client)}
+                            className="p-2 text-rose-550 bg-slate-50 hover:bg-rose-50 border border-slate-100 rounded-xl transition-all"
+                            title="Terminate client instance"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+
+              {filteredClients.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+                  <Users className="h-14 w-14 opacity-20 mb-4" />
+                  <p className="font-bold text-lg text-slate-700">No firm accounts found</p>
+                </div>
+              )}
             </div>
           )}
         </div>
