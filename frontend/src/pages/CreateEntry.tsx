@@ -609,7 +609,7 @@ const CreateEntry: React.FC = () => {
               
               <button 
                 type="button"
-                onClick={() => handlePrint()}
+                onClick={() => window.print()}
                 className="w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/10 transition-colors text-sm uppercase tracking-wider"
               >
                 <Printer className="h-5 w-5" /> Print Voucher
@@ -1065,7 +1065,7 @@ const CreateEntry: React.FC = () => {
       </datalist>
 
       {/* Printable container for react-to-print */}
-      <div className="hidden print:block font-sans text-black">
+      <div id="printable-invoice-area" className="hidden print:block font-sans text-black">
         <PrintableInvoice ref={contentRef} data={getInvoiceData()} user={user} />
       </div>
 

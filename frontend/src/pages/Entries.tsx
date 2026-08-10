@@ -242,10 +242,10 @@ const Entries: React.FC = () => {
                     <td className="px-8 py-5 text-right">
                       <div className="flex justify-end gap-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                         <button 
-                          onClick={() => setPrintData({ ...e, companyName: user?.companyName })}
+                          onClick={() => triggerPrint(e)}
                           className="px-4 py-2 bg-slate-100 hover:bg-indigo-600 text-slate-700 hover:text-white font-bold text-[10px] uppercase tracking-wider rounded-xl flex items-center gap-2 inline-flex transition-all cursor-pointer"
                         >
-                          <Printer className="h-3.5 w-3.5" /> Print
+                          <Printer className="h-3.5 w-3.5" /> Print Invoice
                         </button>
                       </div>
                     </td>
