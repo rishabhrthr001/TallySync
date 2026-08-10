@@ -176,7 +176,7 @@ const CreateEntry: React.FC = () => {
 
   // Print Setup
   const contentRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({ contentRef });
+  const handlePrint = useReactToPrint({ contentRef, content: () => contentRef.current });
 
   const getInvoiceData = (): InvoiceData => ({
     type, partyName, partyGstin, invoiceNumber, date, items, taxableAmount, taxAmount, totalAmount, gstType, notes, companyName: user?.companyName || ''
@@ -1064,8 +1064,8 @@ const CreateEntry: React.FC = () => {
         ))}
       </datalist>
 
-      {/* Off-screen container for react-to-print to prevent mobile fallbacks */}
-      <div className="print-container absolute top-[-9999px] left-[-9999px] print:static print:block">
+      {/* Printable container for react-to-print */}
+      <div className="hidden print:block font-sans text-black">
         <PrintableInvoice ref={contentRef} data={getInvoiceData()} user={user} />
       </div>
 

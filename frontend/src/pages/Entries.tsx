@@ -48,7 +48,8 @@ const Entries: React.FC = () => {
   const printRef = useRef<HTMLDivElement>(null);
 
   const handlePrintAction = useReactToPrint({
-    contentRef: printRef
+    contentRef: printRef,
+    content: () => printRef.current
   });
 
   useEffect(() => {
@@ -334,8 +335,8 @@ const Entries: React.FC = () => {
         )}
       </div>
 
-      {/* Off-screen container for react-to-print to prevent blank print fallback */}
-      <div className="print-container fixed top-[-9999px] left-[-9999px] print:static print:block pointer-events-none opacity-0 print:opacity-100">
+      {/* Printable container for react-to-print */}
+      <div className="hidden print:block font-sans text-black">
         <PrintableInvoice ref={printRef} data={printData} user={user} />
       </div>
     </Layout>
