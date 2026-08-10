@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { 
-  Search, Download, ExternalLink, RefreshCcw, CheckCircle2, Clock, XCircle, ChevronRight, TrendingUp, TrendingDown, Printer, Filter
+  Search, Download, ExternalLink, RefreshCcw, CheckCircle2, Clock, XCircle, ChevronRight, TrendingUp, TrendingDown, Printer, Filter, X
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { motion, AnimatePresence } from 'motion/react';
@@ -44,6 +44,7 @@ const Entries: React.FC = () => {
   };
 
   const [printData, setPrintData] = useState<any>(defaultPrintData);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -81,11 +82,7 @@ const Entries: React.FC = () => {
     };
 
     setPrintData(formatted);
-    setTimeout(() => {
-      if (printRef.current) {
-        handlePrintAction();
-      }
-    }, 150);
+    setIsPrintModalOpen(true);
   };
 
   const fetchEntries = async () => {
@@ -335,10 +332,60 @@ const Entries: React.FC = () => {
         )}
       </div>
 
-      {/* Printable container for react-to-print */}
-      <div className="hidden print:block font-sans text-black">
-        <PrintableInvoice ref={printRef} data={printData} user={user} />
-      </div>
+      {/* Interactive Print Preview Modal */}
+      <AnimatePresence>
+        {isPrintModalOpen && printData && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-900/80 backdrop-blur-md overflow-y-auto print:p-0 print:bg-white print:static">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col my-auto border border-slate-200 print:shadow-none print:border-none print:w-full print:max-w-none print:rounded-none"
+            >
+              {/* Modal Header Bar (Hidden on Print) */}
+              <div className="p-4 sm:p-6 bg-slate-900 text-white flex justify-between items-center print:hidden border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center text-white">
+                    <Printer className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white">Tax Invoice Preview</h3>
+                    <p className="text-xs text-slate-400 font-semibold">{printData.invoiceNumber} • {printData.partyName}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (printRef.current) {
+                        handlePrintAction();
+                      } else {
+                        window.print();
+                      }
+                    }}
+                    className="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-emerald-500 hover:from-indigo-600 hover:to-emerald-600 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" /> Confirm Print / Save PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPrintModalOpen(false)}
+                    className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Invoice Body */}
+              <div id="printable-invoice-area" className="p-4 sm:p-8 bg-white overflow-y-auto max-h-[80vh] print:max-h-none print:overflow-visible print:p-0">
+                <PrintableInvoice ref={printRef} data={printData} user={user} />
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </Layout>
   );
 };

@@ -76,9 +76,9 @@ body {
 
 @media print {
   html, body {
-    height: 100% !important;
-    overflow: hidden !important;
-    max-height: 100vh !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
   }
 
   /* Hide all elements during printing */
@@ -86,22 +86,24 @@ body {
     visibility: hidden !important;
   }
   
-  /* Make the print container and all its children visible */
-  .print-container,
-  .print-container * {
+  /* Make the printable invoice area and all its children visible */
+  #printable-invoice-area,
+  #printable-invoice-area * {
     visibility: visible !important;
   }
   
-  /* Position the print container to cover the fixed viewport page */
-  .print-container {
-    position: fixed !important;
+  /* Position the print container to cover the entire page */
+  #printable-invoice-area {
+    position: absolute !important;
     left: 0 !important;
     top: 0 !important;
     width: 100% !important;
-    height: 100% !important;
+    height: auto !important;
     display: block !important;
     z-index: 9999999 !important;
     background: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 }
 
