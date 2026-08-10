@@ -78,7 +78,8 @@ const PrintableInvoice = forwardRef<HTMLDivElement, Props>(({ data, user }, ref)
   const companyName = data?.companyName || user?.companyName || user?.name || 'PHOTO BILL ENTERPRISES';
   const companyGstin = data?.companyGstin || user?.gstin || '07AAAAA0000A1Z5';
   const companyPhone = data?.companyPhone || user?.phone || '';
-  const companyAddress = data?.companyAddress || user?.address || 'Main Commercial Complex, New Delhi - 110001';
+  const companyAddress = data?.companyAddress || user?.address || '';
+  const partyAddress = data?.partyAddress || (data as any)?.address || '';
 
   const isSales = data?.type === 'sales';
   const titleBadge = isSales ? 'TAX INVOICE' : 'PURCHASE VOUCHER';
@@ -107,11 +108,13 @@ const PrintableInvoice = forwardRef<HTMLDivElement, Props>(({ data, user }, ref)
           <div className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 uppercase">
             {companyName}
           </div>
-          <p className="text-xs font-bold text-slate-600 leading-relaxed whitespace-pre-line">
-            {companyAddress}
-          </p>
+          {companyAddress && (
+            <p className="text-xs font-bold text-slate-600 leading-relaxed whitespace-pre-line">
+              {companyAddress}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-extrabold text-slate-800 pt-1">
-            <span>GSTIN: <span className="font-mono text-slate-900">{companyGstin}</span></span>
+            {companyGstin && <span>GSTIN: <span className="font-mono text-slate-900">{companyGstin}</span></span>}
             {companyPhone && <span>Mob: <span className="font-mono">{companyPhone}</span></span>}
           </div>
         </div>
@@ -127,34 +130,28 @@ const PrintableInvoice = forwardRef<HTMLDivElement, Props>(({ data, user }, ref)
             <div className="text-xs font-bold text-slate-600">
               Date: <span className="font-mono text-slate-900">{data?.date || new Date().toISOString().split('T')[0]}</span>
             </div>
-            <div className="text-xs font-semibold text-slate-500">
-              State Code: <span className="font-mono font-bold text-slate-700">07 (Delhi)</span>
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Bill To & Bill From Cards */}
-      <div className="grid grid-cols-2 gap-6 mb-6">
+      {/* Bill To Card (Without Dispatch Details) */}
+      <div className="mb-6">
         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5">
           <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block border-b border-slate-200 pb-1 mb-2">
             Billed To (Buyer)
           </span>
-          <h3 className="text-base font-extrabold text-slate-900">{data?.partyName || 'Cash Customer'}</h3>
-          {data?.partyAddress && <p className="text-xs text-slate-600 font-medium">{data.partyAddress}</p>}
-          <div className="text-xs font-bold text-slate-700 pt-1">
-            GSTIN / UIN: <span className="font-mono font-extrabold text-slate-900">{data?.partyGstin || 'URP (Unregistered)'}</span>
-          </div>
-        </div>
-
-        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5">
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block border-b border-slate-200 pb-1 mb-2">
-            Dispatch Details
-          </span>
-          <div className="text-xs font-semibold text-slate-700 space-y-1">
-            <div>Place of Supply: <span className="font-bold text-slate-900">Delhi (07)</span></div>
-            <div>Reverse Charge: <span className="font-bold text-slate-900">No</span></div>
-            <div>Transport Mode: <span className="font-bold text-slate-900">Road / Hand Delivery</span></div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900">{data?.partyName || 'Cash Customer'}</h3>
+              {partyAddress && (
+                <p className="text-xs text-slate-600 font-medium mt-0.5 whitespace-pre-line">{partyAddress}</p>
+              )}
+            </div>
+            {data?.partyGstin && (
+              <div className="text-xs font-bold text-slate-700 sm:text-right shrink-0">
+                GSTIN / UIN: <span className="font-mono font-extrabold text-slate-900">{data.partyGstin}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

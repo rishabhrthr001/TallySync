@@ -83,6 +83,9 @@ const Entries: React.FC = () => {
 
     setPrintData(formatted);
     setIsPrintModalOpen(true);
+    setTimeout(() => {
+      window.print();
+    }, 250);
   };
 
   const fetchEntries = async () => {
@@ -357,13 +360,7 @@ const Entries: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      if (printRef.current) {
-                        handlePrintAction();
-                      } else {
-                        window.print();
-                      }
-                    }}
+                    onClick={() => window.print()}
                     className="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-emerald-500 hover:from-indigo-600 hover:to-emerald-600 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all cursor-pointer"
                   >
                     <Printer className="w-4 h-4" /> Confirm Print / Save PDF
