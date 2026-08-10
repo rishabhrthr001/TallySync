@@ -305,35 +305,94 @@ export default function Admin() {
           <h2 className="text-3xl font-black text-slate-900 tracking-tight mt-1.5 font-sans">Mainframe Dashboard</h2>
           <p className="text-slate-400 text-sm font-semibold mt-0.5">Oversee multi-tenant synchronization log and tenant profiles</p>
         </div>
-        
-        {/* Navigation Tabs */}
-        <div className="flex bg-slate-100/80 p-1 rounded-2xl border border-slate-200/50 max-w-full overflow-x-auto whitespace-nowrap self-start lg:self-auto">
+        </div>
+
+        {/* 3 Main Touchable Action Buttons */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          {/* Button 1: Sync Queue */}
           <button
+            type="button"
             onClick={() => handleTabChange('entries')}
-            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-              activeTab === 'entries' ? 'bg-white text-indigo-600 shadow-md shadow-indigo-500/5' : 'text-slate-500 hover:text-slate-800'
+            className={`p-6 rounded-3xl text-left border transition-all duration-300 cursor-pointer flex items-center justify-between group ${
+              activeTab === 'entries'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-indigo-600 shadow-xl shadow-indigo-500/20 scale-[1.02]'
+                : 'bg-white text-slate-800 border-slate-200 hover:border-indigo-300 hover:shadow-lg'
             }`}
           >
-            Sync Queue
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg ${
+                activeTab === 'entries' ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-600'
+              }`}>
+                <FileText className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <span className={`text-[10px] font-black uppercase tracking-widest block ${
+                  activeTab === 'entries' ? 'text-indigo-200' : 'text-slate-400'
+                }`}>Main Button 1</span>
+                <h3 className="text-lg font-black tracking-tight">Sync Queue</h3>
+              </div>
+            </div>
+            <div className={`w-3 h-3 rounded-full ${
+              activeTab === 'entries' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-200'
+            }`} />
           </button>
+
+          {/* Button 2: Firm Network */}
           <button
+            type="button"
             onClick={() => handleTabChange('clients')}
-            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-              activeTab === 'clients' ? 'bg-white text-indigo-600 shadow-md shadow-indigo-500/5' : 'text-slate-500 hover:text-slate-800'
+            className={`p-6 rounded-3xl text-left border transition-all duration-300 cursor-pointer flex items-center justify-between group ${
+              activeTab === 'clients'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white border-emerald-600 shadow-xl shadow-emerald-500/20 scale-[1.02]'
+                : 'bg-white text-slate-800 border-slate-200 hover:border-emerald-300 hover:shadow-lg'
             }`}
           >
-            Firm Network
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg ${
+                activeTab === 'clients' ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-600'
+              }`}>
+                <Users className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <span className={`text-[10px] font-black uppercase tracking-widest block ${
+                  activeTab === 'clients' ? 'text-emerald-200' : 'text-slate-400'
+                }`}>Main Button 2</span>
+                <h3 className="text-lg font-black tracking-tight">Firm Network</h3>
+              </div>
+            </div>
+            <div className={`w-3 h-3 rounded-full ${
+              activeTab === 'clients' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-200'
+            }`} />
           </button>
+
+          {/* Button 3: Company Reports */}
           <button
+            type="button"
             onClick={() => handleTabChange('reports')}
-            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-              activeTab === 'reports' ? 'bg-white text-indigo-600 shadow-md shadow-indigo-500/5' : 'text-slate-500 hover:text-slate-800'
+            className={`p-6 rounded-3xl text-left border transition-all duration-300 cursor-pointer flex items-center justify-between group ${
+              activeTab === 'reports'
+                ? 'bg-gradient-to-r from-violet-600 to-purple-700 text-white border-violet-600 shadow-xl shadow-violet-500/20 scale-[1.02]'
+                : 'bg-white text-slate-800 border-slate-200 hover:border-violet-300 hover:shadow-lg'
             }`}
           >
-            Company Reports
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg ${
+                activeTab === 'reports' ? 'bg-white/20 text-white' : 'bg-violet-50 text-violet-600'
+              }`}>
+                <BarChart3 className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <span className={`text-[10px] font-black uppercase tracking-widest block ${
+                  activeTab === 'reports' ? 'text-violet-200' : 'text-slate-400'
+                }`}>Main Button 3</span>
+                <h3 className="text-lg font-black tracking-tight">Company Reports</h3>
+              </div>
+            </div>
+            <div className={`w-3 h-3 rounded-full ${
+              activeTab === 'reports' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-200'
+            }`} />
           </button>
         </div>
-      </div>
 
       {activeTab === 'entries' && (
         <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.02)] overflow-hidden">
