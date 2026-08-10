@@ -335,18 +335,18 @@ const Entries: React.FC = () => {
         )}
       </div>
 
-      {/* Interactive Print Preview Modal */}
+      {/* Screen-Only Print Preview Modal */}
       <AnimatePresence>
         {isPrintModalOpen && printData && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-900/80 backdrop-blur-md overflow-y-auto print:p-0 print:bg-white print:static">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-900/80 backdrop-blur-md overflow-y-auto print:hidden">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col my-auto border border-slate-200 print:shadow-none print:border-none print:w-full print:max-w-none print:rounded-none"
+              className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col my-auto border border-slate-200"
             >
-              {/* Modal Header Bar (Hidden on Print) */}
-              <div className="p-4 sm:p-6 bg-slate-900 text-white flex justify-between items-center print:hidden border-b border-slate-800">
+              {/* Modal Header Bar */}
+              <div className="p-4 sm:p-6 bg-slate-900 text-white flex justify-between items-center border-b border-slate-800">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center text-white">
                     <Printer className="w-5 h-5" />
@@ -375,14 +375,19 @@ const Entries: React.FC = () => {
                 </div>
               </div>
 
-              {/* Printable Invoice Body */}
-              <div id="printable-invoice-area" className="p-4 sm:p-8 bg-white overflow-y-auto max-h-[80vh] print:max-h-none print:overflow-visible print:p-0">
-                <PrintableInvoice ref={printRef} data={printData} user={user} />
+              {/* Screen Invoice Body */}
+              <div className="p-4 sm:p-8 bg-white overflow-y-auto max-h-[80vh]">
+                <PrintableInvoice data={printData} user={user} />
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      {/* Dedicated Standalone Native Print Container (Hidden on Screen, Active on Print) */}
+      <div id="printable-invoice-root" className="hidden print:block font-sans text-black">
+        {printData && <PrintableInvoice ref={printRef} data={printData} user={user} />}
+      </div>
     </Layout>
   );
 };

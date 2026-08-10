@@ -1065,7 +1065,7 @@ const CreateEntry: React.FC = () => {
       </datalist>
 
       {/* Printable container for react-to-print */}
-      <div id="printable-invoice-area" className="hidden print:block font-sans text-black">
+      <div id="printable-invoice-root" className="hidden print:block font-sans text-black">
         <PrintableInvoice ref={contentRef} data={getInvoiceData()} user={user} />
       </div>
 
