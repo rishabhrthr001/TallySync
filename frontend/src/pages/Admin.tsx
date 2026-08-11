@@ -98,6 +98,8 @@ export default function Admin() {
   const [clientToDelete, setClientToDelete] = useState<User | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [revealPasswordId, setRevealPasswordId] = useState<string | null>(null);
+  const [showNewClientPassword, setShowNewClientPassword] = useState(false);
+  const [showEditClientPassword, setShowEditClientPassword] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -1270,12 +1272,22 @@ export default function Admin() {
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Update Access Key (Optional)</label>
-                  <input 
-                    type="password" 
-                    onChange={e => setEditingClient({...editingClient, password: e.target.value} as any)}
-                    className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all"
-                    placeholder="Leave blank to preserve existing key"
-                  />
+                  <div className="relative">
+                    <input 
+                      type={showEditClientPassword ? 'text' : 'password'}
+                      onChange={e => setEditingClient({...editingClient, password: e.target.value} as any)}
+                      className="w-full px-5 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all"
+                      placeholder="Leave blank to preserve existing key"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowEditClientPassword(p => !p)}
+                      className="absolute right-4 top-3.5 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                      tabIndex={-1}
+                    >
+                      {showEditClientPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex gap-4 pt-2">
@@ -1408,14 +1420,24 @@ export default function Admin() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2 col-span-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Access Key</label>
-                    <input 
-                      required
-                      type="password" 
-                      value={newClient.password}
-                      onChange={e => setNewClient({...newClient, password: e.target.value})}
-                      className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
-                      placeholder="••••••••"
-                    />
+                    <div className="relative">
+                      <input 
+                        required
+                        type={showNewClientPassword ? 'text' : 'password'}
+                        value={newClient.password}
+                        onChange={e => setNewClient({...newClient, password: e.target.value})}
+                        className="w-full px-5 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:bg-white focus:border-indigo-400 outline-none transition-all placeholder:text-slate-350"
+                        placeholder="••••••••"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewClientPassword(p => !p)}
+                        className="absolute right-4 top-3.5 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                        tabIndex={-1}
+                      >
+                        {showNewClientPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
