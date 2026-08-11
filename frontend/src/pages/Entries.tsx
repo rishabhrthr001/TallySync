@@ -10,6 +10,7 @@ import { useReactToPrint } from 'react-to-print';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { formatCurrency } from '../utils/format';
+import { formatVoucherStatusMessage } from '../utils/statusFormatter';
 import { useSearchParams } from 'react-router-dom';
 
 const Entries: React.FC = () => {
@@ -244,45 +245,58 @@ const Entries: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-8 py-5">
-                      <div className="flex flex-col items-center justify-center gap-1.5">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
-                          e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
-                          e.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-100' : 
-                          'bg-amber-50 text-amber-700 animate-pulse border border-amber-100'
-                        }`}>
-                          {e.status === 'success' ? <CheckCircle2 className="h-3.5 w-3.5 stroke-[2.2]" /> : 
-                           e.status === 'failed' ? <XCircle className="h-3.5 w-3.5 stroke-[2.2]" /> : 
-                           <Clock className="h-3.5 w-3.5 stroke-[2.2]" />}
-                          {e.status || 'pending'}
-                        </span>
-
-                        {/* Failure reason & Retry */}
-                        {e.status === 'failed' && (
-                          <div className="flex flex-col items-center gap-1 mt-0.5">
-                            <span className="text-[10px] font-semibold text-rose-600 bg-rose-50/80 px-2 py-0.5 rounded-md border border-rose-200/60 max-w-[180px] leading-tight break-words text-center" title={e.syncError || e.reason}>
-                              {e.syncError || e.reason || 'Tally sync failed'}
+                      {(() => {
+                        const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
+                        return (
+                          <div className="flex flex-col items-center justify-center gap-1.5 max-w-[220px] mx-auto">
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
+                              e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
+                              e.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-100' : 
+                              'bg-amber-50 text-amber-700 animate-pulse border border-amber-100'
+                            }`}>
+                              {e.status === 'success' ? <CheckCircle2 className="h-3.5 w-3.5 stroke-[2.2]" /> : 
+                               e.status === 'failed' ? <XCircle className="h-3.5 w-3.5 stroke-[2.2]" /> : 
+                               <Clock className="h-3.5 w-3.5 stroke-[2.2]" />}
+                              {info.badgeText}
                             </span>
-                            <button
-                              onClick={() => handleRetryEntry(e._id)}
-                              disabled={retryingId === e._id}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
-                              title="Re-queue entry for Tally sync"
-                            >
-                              <RotateCcw className={`h-2.5 w-2.5 ${retryingId === e._id ? 'animate-spin' : ''}`} />
-                              {retryingId === e._id ? 'Retrying...' : 'Retry'}
-                            </button>
-                          </div>
-                        )}
 
-                        {/* Pending reason */}
-                        {e.status === 'pending' && (
-                          <div className="flex flex-col items-center gap-1 mt-0.5">
-                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-50/80 px-2 py-0.5 rounded-md border border-amber-200/60 max-w-[180px] leading-tight break-words text-center">
-                              {e.reason || 'Queued for Tally agent'}
-                            </span>
+                            {/* Failure reason & Actionable Hint & Retry */}
+                            {e.status === 'failed' && (
+                              <div className="flex flex-col items-center gap-1 mt-0.5 w-full">
+                                <span className="text-[10px] font-bold text-rose-700 bg-rose-50/90 px-2.5 py-1 rounded-lg border border-rose-200/70 leading-tight break-words text-center w-full" title={info.detail}>
+                                  {info.headline}
+                                </span>
+                                {info.hint && (
+                                  <span className="text-[8.5px] font-medium text-slate-500 text-center leading-tight">
+                                    💡 {info.hint}
+                                  </span>
+                                )}
+                                <button
+                                  onClick={() => handleRetryEntry(e._id)}
+                                  disabled={retryingId === e._id}
+                                  className="inline-flex items-center gap-1 px-3 py-1 mt-0.5 text-[9px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                                  title="Re-queue entry for Tally sync"
+                                >
+                                  <RotateCcw className={`h-2.5 w-2.5 ${retryingId === e._id ? 'animate-spin' : ''}`} />
+                                  {retryingId === e._id ? 'Retrying...' : 'Retry Sync'}
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Pending reason & guidance */}
+                            {e.status === 'pending' && (
+                              <div className="flex flex-col items-center gap-0.5 mt-0.5 w-full">
+                                <span className="text-[9.5px] font-bold text-amber-800 bg-amber-50/90 px-2.5 py-1 rounded-lg border border-amber-200/70 leading-tight break-words text-center w-full" title={info.detail}>
+                                  {info.headline}
+                                </span>
+                                <span className="text-[8.5px] font-medium text-slate-400 text-center">
+                                  Runs automatically on Tally PC
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-8 py-5 text-right font-black text-slate-900 text-sm font-mono">
                       {formatCurrency(e.totalAmount || 0)}
@@ -307,7 +321,9 @@ const Entries: React.FC = () => {
         {/* Mobile Card Grid View */}
         <div className="block md:hidden p-4 space-y-4">
           <AnimatePresence>
-            {filteredEntries.map((e, idx) => (
+            {filteredEntries.map((e, idx) => {
+              const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
+              return (
               <motion.div
                 key={e._id}
                 initial={{ opacity: 0, scale: 0.98 }}
@@ -335,7 +351,7 @@ const Entries: React.FC = () => {
                     {e.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> : 
                      e.status === 'failed' ? <XCircle className="h-3 w-3" /> : 
                      <Clock className="h-3 w-3" />}
-                    {e.status || 'pending'}
+                    {info.badgeText}
                   </span>
                 </div>
 
@@ -353,24 +369,39 @@ const Entries: React.FC = () => {
                 </div>
 
                 {e.status === 'failed' && (
-                  <div className="p-3 bg-rose-50 border border-rose-100 text-rose-700 rounded-xl text-xs space-y-2">
-                    <div className="font-semibold leading-relaxed">
-                      <strong>Failure Reason:</strong> {e.syncError || e.reason || 'Tally rejected entry'}
+                  <div className="p-3.5 bg-rose-50 border border-rose-200/80 text-rose-800 rounded-2xl text-xs space-y-2">
+                    <div className="font-bold text-rose-900 flex items-center gap-1.5">
+                      <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      {info.headline}
                     </div>
+                    <p className="text-[11px] text-rose-700/90 leading-relaxed font-medium">
+                      {info.detail}
+                    </p>
+                    {info.hint && (
+                      <p className="text-[10px] text-slate-600 bg-white/60 p-2 rounded-xl border border-rose-100 leading-snug">
+                        💡 <strong>How to fix:</strong> {info.hint}
+                      </p>
+                    )}
                     <button
                       onClick={() => handleRetryEntry(e._id)}
                       disabled={retryingId === e._id}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                      className="inline-flex items-center gap-1 px-3 py-2 text-[10px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50 w-full justify-center"
                     >
                       <RotateCcw className={`h-3 w-3 ${retryingId === e._id ? 'animate-spin' : ''}`} />
-                      {retryingId === e._id ? 'Retrying...' : 'Retry Sync'}
+                      {retryingId === e._id ? 'Retrying...' : 'Retry Tally Sync'}
                     </button>
                   </div>
                 )}
 
                 {e.status === 'pending' && (
-                  <div className="p-2.5 bg-amber-50 border border-amber-100 text-amber-800 rounded-xl text-xs font-semibold">
-                    <strong>Status:</strong> {e.reason || 'Queued for Tally agent'}
+                  <div className="p-3 bg-amber-50/80 border border-amber-200/70 text-amber-900 rounded-2xl text-xs space-y-1">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                      <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      {info.headline}
+                    </div>
+                    <p className="text-[10.5px] text-amber-700 leading-snug">
+                      {info.detail}
+                    </p>
                   </div>
                 )}
 
@@ -378,10 +409,10 @@ const Entries: React.FC = () => {
                   onClick={() => triggerPrint(e)}
                   className="w-full py-3 bg-slate-50 hover:bg-indigo-50 border border-slate-200 active:border-indigo-200 text-slate-700 active:text-indigo-600 font-bold text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                 >
-                  <Printer className="w-4 h-4" /> Print Invoice
+                  <Printer className="h-4 w-4" /> Print Invoice
                 </button>
               </motion.div>
-            ))}
+            );})}
           </AnimatePresence>
         </div>
 

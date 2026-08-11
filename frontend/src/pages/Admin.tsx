@@ -34,6 +34,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import axios from 'axios';
 import { formatCurrency } from '../utils/format';
+import { formatVoucherStatusMessage } from '../utils/statusFormatter';
 import Layout from '../components/Layout';
 
 interface User {
@@ -469,13 +470,30 @@ export default function Admin() {
                           {formatCurrency(entry.totalAmount)}
                         </td>
                         <td className="px-8 py-5 text-center">
-                          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                            isSuccess ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
-                            isPending ? 'bg-amber-50 text-amber-700 border border-amber-100' : 
-                            'bg-rose-50 text-rose-700 border border-rose-100'
-                          } border`}>
-                            {entry.status}
-                          </span>
+                          {(() => {
+                            const info = formatVoucherStatusMessage(entry.status, entry.syncError, entry.reason);
+                            return (
+                              <div className="flex flex-col items-center gap-1">
+                                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                                  isSuccess ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
+                                  isPending ? 'bg-amber-50 text-amber-700 border border-amber-100' : 
+                                  'bg-rose-50 text-rose-700 border border-rose-100'
+                                } border`}>
+                                  {info.badgeText}
+                                </span>
+                                {isFailed && (
+                                  <span className="text-[9px] font-semibold text-rose-600 max-w-[140px] truncate" title={`${info.headline} - ${info.detail}`}>
+                                    {info.headline}
+                                  </span>
+                                )}
+                                {isPending && (
+                                  <span className="text-[9px] font-semibold text-amber-750 max-w-[140px] truncate" title={info.detail}>
+                                    {info.headline}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-8 py-5 text-right">
                           <div className="flex justify-end gap-2">
@@ -535,21 +553,38 @@ export default function Admin() {
                     transition={{ delay: idx * 0.01 }}
                     className="bg-slate-50/50 p-5 rounded-2xl border border-slate-200/80 space-y-4 shadow-sm"
                   >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="text-sm font-black text-slate-900 leading-tight">{entry.companyName || entry.userName}</h4>
-                        <span className="text-[10px] font-bold text-slate-400 mt-1 uppercase block">
-                          Logged: {format(new Date(entry.createdAt), 'MMM d, HH:mm')}
-                        </span>
-                      </div>
-                      <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border ${
-                        isSuccess ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                        isPending ? 'bg-amber-50 text-amber-700 border-amber-100' :
-                        'bg-rose-50 text-rose-700 border-rose-100'
-                      }`}>
-                        {entry.status}
-                      </span>
-                    </div>
+                    {(() => {
+                      const info = formatVoucherStatusMessage(entry.status, entry.syncError, entry.reason);
+                      return (
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 leading-tight">{entry.companyName || entry.userName}</h4>
+                            <span className="text-[10px] font-bold text-slate-400 mt-1 uppercase block">
+                              Logged: {format(new Date(entry.createdAt), 'MMM d, HH:mm')}
+                            </span>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border ${
+                              isSuccess ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                              isPending ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                              'bg-rose-50 text-rose-700 border-rose-100'
+                            }`}>
+                              {info.badgeText}
+                            </span>
+                            {isFailed && (
+                              <span className="text-[9px] font-semibold text-rose-600 max-w-[150px] text-right truncate" title={info.detail}>
+                                {info.headline}
+                              </span>
+                            )}
+                            {isPending && (
+                              <span className="text-[9px] font-semibold text-amber-750 max-w-[150px] text-right truncate" title={info.detail}>
+                                {info.headline}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     
                     <div className="grid grid-cols-2 gap-2 border-t border-slate-200/60 pt-3">
                       <div>

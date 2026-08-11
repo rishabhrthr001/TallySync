@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/format';
+import { formatVoucherStatusMessage } from '../utils/statusFormatter';
 import { useToast } from '../contexts/ToastContext';
 import PrintableInvoice from '../components/PrintableInvoice';
 import { useReactToPrint } from 'react-to-print';
@@ -660,35 +661,40 @@ const Dashboard: React.FC = () => {
                   {/* Status & Printed Badges */}
                   <div className="flex items-center gap-3">
                     {/* Sync Status & Reason */}
-                    <div className="flex flex-col items-end gap-1">
-                      <span className={`inline-flex items-center gap-1.5 text-[8.5px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${
-                        e.status === 'success' ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' :
-                        e.status === 'failed' ? 'text-rose-700 bg-rose-50 border border-rose-100' :
-                        'text-amber-700 bg-amber-50 border border-amber-100 animate-pulse'
-                      }`}>
-                        {e.status || 'pending'}
-                      </span>
-                      {e.status === 'failed' && (
-                        <div className="flex items-center gap-1">
-                          <span className="text-[9px] font-semibold text-rose-500 max-w-[130px] truncate" title={e.syncError || e.reason}>
-                            {e.syncError || e.reason || 'Sync error'}
+                    {(() => {
+                      const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
+                      return (
+                        <div className="flex flex-col items-end gap-1">
+                          <span className={`inline-flex items-center gap-1.5 text-[8.5px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${
+                            e.status === 'success' ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' :
+                            e.status === 'failed' ? 'text-rose-700 bg-rose-50 border border-rose-100' :
+                            'text-amber-700 bg-amber-50 border border-amber-100 animate-pulse'
+                          }`}>
+                            {info.badgeText}
                           </span>
-                          <button
-                            onClick={() => handleRetryBill(e._id)}
-                            disabled={retryingBillId === e._id}
-                            className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md border border-rose-200 transition-all cursor-pointer disabled:opacity-50"
-                            title="Retry sync"
-                          >
-                            <RotateCcw className={`h-2.5 w-2.5 ${retryingBillId === e._id ? 'animate-spin' : ''}`} />
-                          </button>
+                          {e.status === 'failed' && (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] font-semibold text-rose-600 max-w-[150px] truncate" title={`${info.headline} - ${info.detail}`}>
+                                {info.headline}
+                              </span>
+                              <button
+                                onClick={() => handleRetryBill(e._id)}
+                                disabled={retryingBillId === e._id}
+                                className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md border border-rose-200 transition-all cursor-pointer disabled:opacity-50"
+                                title="Retry sync"
+                              >
+                                <RotateCcw className={`h-2.5 w-2.5 ${retryingBillId === e._id ? 'animate-spin' : ''}`} />
+                              </button>
+                            </div>
+                          )}
+                          {e.status === 'pending' && (
+                            <span className="text-[9px] font-semibold text-amber-700 max-w-[150px] truncate" title={info.detail}>
+                              {info.headline}
+                            </span>
+                          )}
                         </div>
-                      )}
-                      {e.status === 'pending' && (
-                        <span className="text-[9px] font-semibold text-amber-600 max-w-[130px] truncate" title={e.reason || 'Queued for agent'}>
-                          {e.reason || 'Queued for agent'}
-                        </span>
-                      )}
-                    </div>
+                      );
+                    })()}
 
                     {/* Printed Status */}
                     <span className={`inline-flex items-center gap-1 text-[8.5px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${
