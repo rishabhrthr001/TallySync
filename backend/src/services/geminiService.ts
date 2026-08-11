@@ -44,7 +44,7 @@ const productExtractionSchema = {
  */
 export async function extractProductDetails(base64Image: string): Promise<ExtractedProductInfo> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
     // Parse base64 string to inlineData structure
     const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
@@ -181,8 +181,7 @@ export interface ExtractedInvoiceInfo {
  */
 export async function extractInvoiceDetails(buffer: Buffer, mimeType: string, docType: 'sales' | 'purchase' = 'purchase'): Promise<ExtractedInvoiceInfo> {
   try {
-    // Upgrade model to gemini-1.5-pro for high precision OCR & reasoning
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
     const docPart = {
       inlineData: {
@@ -244,16 +243,16 @@ GENERAL INSTRUCTIONS:
 
     const responseText = result.response.text();
     if (!responseText) {
-      throw new Error('Gemini 1.5 Pro returned empty content.');
+      throw new Error('Gemini returned empty content.');
     }
 
     return JSON.parse(responseText) as ExtractedInvoiceInfo;
   } catch (error: any) {
     console.error('Gemini invoice extraction error:', error);
-    // Fallback to gemini-1.5-flash if 1.5-pro hits any unexpected issue
+    // Fallback to gemini-flash-lite-latest if primary hits any unexpected issue
     try {
-      console.log('Retrying with gemini-1.5-flash fallback...');
-      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      console.log('Retrying with gemini-flash-lite-latest fallback...');
+      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-flash-lite-latest' });
       const docPart = { inlineData: { data: buffer.toString('base64'), mimeType } };
       const fallbackPrompt = `Extract invoice details as JSON. Document type: ${docType}. Extract partyName (${docType === 'purchase' ? 'Supplier/Vendor' : 'Buyer/Customer'}), partyGstin, invoiceNumber, date (YYYY-MM-DD), items (clean name without batch lines), taxableAmount, taxAmount, totalAmount, gstType.`;
       const fallbackResult = await fallbackModel.generateContent({
@@ -317,7 +316,7 @@ export interface ExtractedBankStatementInfo {
  */
 export async function extractBankStatementDetails(buffer: Buffer, mimeType: string): Promise<ExtractedBankStatementInfo> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
     const docPart = {
       inlineData: {
@@ -364,15 +363,15 @@ Instructions:
 
     const responseText = result.response.text();
     if (!responseText) {
-      throw new Error('Gemini 1.5 Pro returned empty content.');
+      throw new Error('Gemini returned empty content.');
     }
 
     return JSON.parse(responseText) as ExtractedBankStatementInfo;
   } catch (error: any) {
     console.error('Gemini bank statement extraction error:', error);
     try {
-      console.log('Retrying bank statement extraction with gemini-1.5-flash fallback...');
-      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      console.log('Retrying bank statement extraction with gemini-flash-lite-latest fallback...');
+      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-flash-lite-latest' });
       const docPart = { inlineData: { data: buffer.toString('base64'), mimeType } };
       const fallbackPrompt = `Extract all transactions from this bank statement as JSON with date, voucherType (Payment/Receipt/Contra/Journal), partyName, amount, narration, referenceNumber, confidence, reason.`;
       const fallbackResult = await fallbackModel.generateContent({
