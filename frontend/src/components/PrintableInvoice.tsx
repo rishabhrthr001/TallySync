@@ -101,7 +101,7 @@ const PrintableInvoice = forwardRef<HTMLDivElement, Props>(({ data, user }, ref)
   const isIgst = data?.gstType === 'igst';
 
   return (
-    <div ref={ref} className="p-6 sm:p-8 bg-white text-slate-900 font-sans h-auto leading-normal text-sm border border-slate-200 shadow-sm print:shadow-none print:border-none print:p-2">
+    <div ref={ref} className="p-6 sm:p-8 bg-white text-slate-900 font-sans h-auto leading-normal text-sm border border-slate-200/90 rounded-3xl shadow-sm">
       {/* Top Invoice Header */}
       <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4 gap-4">
         <div className="space-y-1 max-w-lg">

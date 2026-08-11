@@ -82,12 +82,14 @@ body {
 
   html, body {
     background: white !important;
-    color: black !important;
+    color: #0f172a !important;
     height: auto !important;
     max-height: 100% !important;
     overflow: hidden !important;
     margin: 0 !important;
     padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   /* Hide modal overlays, sidebars, headers, and UI controls */
@@ -104,6 +106,8 @@ body {
   #printable-invoice-root,
   #printable-invoice-root * {
     visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   #printable-invoice-root {
@@ -113,7 +117,7 @@ body {
     height: auto !important;
     overflow: hidden !important;
     background: white !important;
-    color: black !important;
+    color: #0f172a !important;
     padding: 0 !important;
     margin: 0 !important;
     page-break-after: avoid !important;
