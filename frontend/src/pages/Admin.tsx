@@ -25,7 +25,10 @@ import {
   ArrowLeft,
   TrendingUp,
   BarChart3,
-  X
+  X,
+  Eye,
+  EyeOff,
+  KeyRound
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -43,6 +46,7 @@ interface User {
   phone?: string;
   address?: string;
   createdAt?: string;
+  plainPassword?: string;
 }
 
 interface Entry {
@@ -93,6 +97,7 @@ export default function Admin() {
   const [editingClient, setEditingClient] = useState<User | null>(null);
   const [clientToDelete, setClientToDelete] = useState<User | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+  const [revealPasswordId, setRevealPasswordId] = useState<string | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -755,6 +760,34 @@ export default function Admin() {
                           <div className="flex items-center gap-3 text-xs text-slate-500 font-bold">
                             <Phone className="w-4 h-4 text-slate-350 shrink-0" />
                             <span>{client.phone || 'No Phone Number'}</span>
+                          </div>
+
+                          {/* Password Reveal Section */}
+                          <div className="flex items-center gap-3 text-xs">
+                            <KeyRound className="w-4 h-4 text-slate-350 shrink-0" />
+                            {client.plainPassword ? (
+                              <div className="flex items-center gap-2 flex-1">
+                                <span className={`font-mono font-bold flex-1 ${
+                                  revealPasswordId === client._id ? 'text-slate-900' : 'text-slate-400'
+                                }`}>
+                                  {revealPasswordId === client._id ? client.plainPassword : '••••••••'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setRevealPasswordId(
+                                    revealPasswordId === client._id ? null : client._id
+                                  )}
+                                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 transition-all cursor-pointer"
+                                  title={revealPasswordId === client._id ? 'Hide password' : 'Show password'}
+                                >
+                                  {revealPasswordId === client._id
+                                    ? <EyeOff className="w-3.5 h-3.5" />
+                                    : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 font-semibold italic">Password not saved (pre-existing)</span>
+                            )}
                           </div>
                         </div>
 

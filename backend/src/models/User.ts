@@ -10,6 +10,7 @@ const userSchema = new mongoose.Schema({
   gstin: { type: String, default: '' },
   phone: { type: String, default: '' },
   address: { type: String, default: '' },
+  plainPassword: { type: String, default: '' },
   subscription: {
     plan: { type: String, enum: ['free', 'trial', 'pro'], default: 'free' },
     trialStartDate: { type: Date, default: null },
