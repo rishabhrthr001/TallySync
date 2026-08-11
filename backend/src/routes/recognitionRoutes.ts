@@ -42,7 +42,7 @@ router.post('/search', authenticateToken, checkProFeatureAccess, async (req: any
 // Get suggestions parameters / config
 router.get('/suggestions', authenticateToken, async (req: any, res) => {
   try {
-    const threshold = Number(process.env.PRODUCT_RECOGNITION_THRESHOLD) || 0.70;
+    const threshold = Number(process.env.PRODUCT_RECOGNITION_THRESHOLD) || 0.50;
     res.json({
       success: true,
       threshold,

@@ -39,7 +39,7 @@ export default function ProductRecognitionModal({ isOpen, onClose, onSelectProdu
   const [suggestions, setSuggestions] = useState<ProductMatch[]>([]);
   const [detectedProduct, setDetectedProduct] = useState<DetectedProduct | null>(null);
   const [totalInventoryCount, setTotalInventoryCount] = useState<number | null>(null);
-  const [threshold, setThreshold] = useState(0.70);
+  const [threshold, setThreshold] = useState(0.50);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
 

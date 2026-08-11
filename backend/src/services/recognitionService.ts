@@ -133,8 +133,8 @@ export async function searchProductsByImage(
   for (const item of items) {
     const confidence = computeMatchScore(item, geminiDetails);
     
-    // Include items with non-zero confidence
-    if (confidence >= 15) {
+    // Only return matching inventory items with a match score of more than 50%
+    if (confidence > 50) {
       matches.push({
         _id: item._id.toString(),
         name: item.name,
