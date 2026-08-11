@@ -45,6 +45,7 @@ const Entries: React.FC = () => {
 
   const [printData, setPrintData] = useState<any>(defaultPrintData);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [shouldPrint, setShouldPrint] = useState(false);
 
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -52,6 +53,16 @@ const Entries: React.FC = () => {
     contentRef: printRef,
     content: () => printRef.current
   });
+
+  // Trigger actual print only after printData is set and component re-renders
+  useEffect(() => {
+    if (shouldPrint && printData) {
+      setShouldPrint(false);
+      setTimeout(() => {
+        handlePrintAction();
+      }, 100);
+    }
+  }, [shouldPrint, printData]);
 
   useEffect(() => {
     fetchEntries();
@@ -83,9 +94,7 @@ const Entries: React.FC = () => {
 
     setPrintData(formatted);
     setIsPrintModalOpen(true);
-    setTimeout(() => {
-      window.print();
-    }, 250);
+    setShouldPrint(true);
   };
 
   const fetchEntries = async () => {
@@ -360,7 +369,7 @@ const Entries: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => window.print()}
+                    onClick={() => handlePrintAction()}
                     className="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-emerald-500 hover:from-indigo-600 hover:to-emerald-600 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all cursor-pointer"
                   >
                     <Printer className="w-4 h-4" /> Confirm Print / Save PDF
@@ -384,8 +393,8 @@ const Entries: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Dedicated Standalone Native Print Container (Hidden on Screen, Active on Print) */}
-      <div id="printable-invoice-root" className="hidden print:block font-sans text-black">
+      {/* Dedicated Standalone Native Print Container - react-to-print renders only this ref */}
+      <div style={{ display: 'none' }}>
         {printData && <PrintableInvoice ref={printRef} data={printData} user={user} />}
       </div>
     </Layout>
