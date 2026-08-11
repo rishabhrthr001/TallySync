@@ -577,6 +577,7 @@ function generateAccountingVoucherXML(entry, partyName, incomeLedger, taxLedgers
         taxLines += `
                         <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(tax.name)}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>${isSales ? 'No' : 'Yes'}</ISDEEMEDPOSITIVE>
                             <AMOUNT>${taxAmtValue.toFixed(2)}</AMOUNT>
                         </LEDGERENTRIES.LIST>`;
     });
@@ -935,13 +936,18 @@ async function syncEntry(entry) {
             tax.name = resolvedNames[tax.name] || tax.name;
         }
 
-        // 3. Ensure Unit of Measure exists
-        await upsertUnit(entry.companyName, 'Nos');
+        const hasValidItems = Array.isArray(entry.items) && entry.items.length > 0 && entry.items.some(i => i && i.name && i.name.trim().length > 0);
+
+        // 3. Ensure Unit of Measure exists (only if itemized bill)
+        if (hasValidItems) {
+            await upsertUnit(entry.companyName, 'Nos');
+        }
 
         // 4. Create any missing stock items FIRST — all of them before the voucher
         const missingItems = [];
-        if (entry.items && entry.items.length > 0) {
+        if (hasValidItems) {
             for (const item of entry.items) {
+                if (!item || !item.name || !item.name.trim()) continue;
                 const itemName = item.name.trim();
                 
                 // For stock items, try SINGULAR form first (e.g., "Software Service")
@@ -989,7 +995,7 @@ async function syncEntry(entry) {
                 const confirmed = findExactName(confirmedStockData, itemName);
                 if (confirmed) {
                     console.log(`[STOCK] Confirmed in Tally: "${confirmed}"`);
-                    const entryItem = entry.items.find(i => i.name.trim() === itemName);
+                    const entryItem = entry.items.find(i => i && i.name && i.name.trim() === itemName);
                     if (entryItem) {
                         entryItem.name = confirmed;
                         entryItem.uom = getUOMForStockItem(confirmedStockData, confirmed);
@@ -1000,15 +1006,15 @@ async function syncEntry(entry) {
             }
         }
 
-        // 5. Create voucher — TRY INVENTORY VOUCHER first (detailed bill with items),
-        //    fall back to ACCOUNTING-ONLY + STOCK JOURNAL if Tally rejects it.
+        // 5. Create voucher — TRY INVENTORY VOUCHER first for itemized bills,
+        //    or directly create ACCOUNTING VOUCHER for No-Item bills.
         const isOk = (r) => r.includes('<CREATED>1</CREATED>') || r.includes('<ALTERED>1</ALTERED>');
 
         let voucherCreated = false;
         let forcedDate = false;
 
-        // Step 5a: Try INVENTORY VOUCHER first (detailed bill with per-item lines)
-        if (entry.items && entry.items.length > 0) {
+        // Step 5a: Try INVENTORY VOUCHER first if entry has items
+        if (hasValidItems) {
             console.log(`\n[VOUCHER] Attempting detailed inventory voucher for ${entry.invoiceNumber}...`);
             const invXml = generateInventoryVoucherXML(entry, partyResolved, incomeResolved, taxLedgers);
             console.log(`[DEBUG XML]\n${invXml}`);
@@ -1027,7 +1033,6 @@ async function syncEntry(entry) {
                 console.log(`[VOUCHER] ✅ Detailed inventory voucher created for ${entry.invoiceNumber}${forcedDate ? ' (Forced 1st of month)' : ''}`);
                 console.log(`[VOUCHER]    → Item details & stock movement recorded in one voucher.`);
                 voucherCreated = true;
-                // No separate Stock Journal needed — inventory voucher handles stock natively
             } else {
                 const errMatch = invResponse.match(/<LINEERROR>(.*?)<\/LINEERROR>/is);
                 const errMsg = errMatch ? errMatch[1].replace(/\s+/g, ' ').trim() : '';
@@ -1036,16 +1041,16 @@ async function syncEntry(entry) {
             }
         }
 
-        // Step 5b: Fallback — ACCOUNTING VOUCHER (no item details, just totals)
+        // Step 5b: ACCOUNTING VOUCHER (no item details, just totals)
         if (!voucherCreated) {
-            console.log(`\n[VOUCHER] Creating accounting-only entry for ${entry.invoiceNumber}...`);
+            console.log(`\n[VOUCHER] Creating accounting voucher (No-Item / Accounting View) for ${entry.invoiceNumber}...`);
             const accXml = generateAccountingVoucherXML(entry, partyResolved, incomeResolved, taxLedgers, forcedDate);
             console.log(`[DEBUG XML]\n${accXml}`);
             let accResponse = await tallyRequest(accXml);
             console.log(`[DEBUG RESPONSE]\n${accResponse}`);
 
             if (!forcedDate && accResponse.includes('Voucher date is missing')) {
-                console.warn(`[VOUCHER] ⚠️  Tally date error detected on accounting fallback. Retrying with 1st of the month...`);
+                console.warn(`[VOUCHER] ⚠️  Tally date error detected on accounting entry. Retrying with 1st of the month...`);
                 const retryXml = generateAccountingVoucherXML(entry, partyResolved, incomeResolved, taxLedgers, true);
                 accResponse = await tallyRequest(retryXml);
                 console.log(`[DEBUG RESPONSE RETRY]\n${accResponse}`);
@@ -1063,10 +1068,10 @@ async function syncEntry(entry) {
                 await updateBackendStatus(entry._id, 'failed', errMsg);
                 return;
             }
-            console.log(`[VOUCHER] ✅ Accounting entry created for ${entry.invoiceNumber}${forcedDate ? ' (Forced 1st of month)' : ''}`);
+            console.log(`[VOUCHER] ✅ Accounting voucher created for ${entry.invoiceNumber}${forcedDate ? ' (Forced 1st of month)' : ''}`);
 
-            // Step 5c: Stock Journal ONLY when accounting-only fallback was used
-            if (entry.items && entry.items.length > 0) {
+            // Step 5c: Stock Journal ONLY when accounting-only fallback was used on an entry that had items
+            if (hasValidItems) {
                 console.log(`[STOCK] Creating Stock Journal for ${entry.invoiceNumber}...`);
                 const sjXml = generateStockJournalXML(entry, forcedDate);
                 const sjResponse = await tallyRequest(sjXml);

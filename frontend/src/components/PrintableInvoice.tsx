@@ -84,21 +84,22 @@ const PrintableInvoice = forwardRef<HTMLDivElement, Props>(({ data, user }, ref)
   const isSales = data?.type === 'sales';
   const titleBadge = isSales ? 'TAX INVOICE' : 'PURCHASE VOUCHER';
 
-  const validItems = Array.isArray(data?.items) && data.items.filter(i => i.name || i.description).length > 0
-    ? data.items.filter(i => i.name || i.description)
-    : [{
-        name: data?.partyName ? `Bill / Voucher Entry - ${data.partyName}` : 'General Supply Item',
-        quantity: 1,
-        rate: data?.taxableAmount || (data?.totalAmount ? Number((data.totalAmount / 1.18).toFixed(2)) : 0),
-        amount: data?.totalAmount || 0,
-        gst: 18,
-        hsn: '9983'
-      }];
-
   const taxable = data?.taxableAmount || Number((data?.totalAmount ? data.totalAmount / 1.18 : 0).toFixed(2));
   const taxVal = data?.taxAmount || Number((data?.totalAmount ? data.totalAmount - taxable : 0).toFixed(2));
   const grandTotal = data?.totalAmount || Number((taxable + taxVal).toFixed(2));
   const isIgst = data?.gstType === 'igst';
+  const effectiveGstRate = taxable > 0 && taxVal > 0 ? Math.round((taxVal / taxable) * 100) : 18;
+
+  const validItems = Array.isArray(data?.items) && data.items.filter(i => i.name || i.description).length > 0
+    ? data.items.filter(i => i.name || i.description)
+    : [{
+        name: data?.partyName ? `Taxable Supply / Service (${isSales ? 'Sales' : 'Purchase'})` : 'Taxable Supply / Service',
+        quantity: 1,
+        rate: taxable,
+        amount: taxable,
+        gst: effectiveGstRate,
+        hsn: '9983'
+      }];
 
   return (
     <div ref={ref} className="p-6 sm:p-8 bg-white text-slate-900 font-sans h-auto leading-normal text-sm border border-slate-200/90 rounded-3xl shadow-sm">

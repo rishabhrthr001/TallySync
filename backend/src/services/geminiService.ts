@@ -275,7 +275,7 @@ const invoiceExtractionSchema = {
       description: 'Any narration, terms, or summary notes.' 
     }
   },
-  required: ['partyName', 'invoiceNumber', 'date', 'items', 'taxableAmount', 'taxAmount', 'totalAmount', 'gstType']
+  required: ['partyName', 'invoiceNumber', 'date', 'taxableAmount', 'taxAmount', 'totalAmount', 'gstType']
 };
 
 export interface ExtractedInvoiceInfo {

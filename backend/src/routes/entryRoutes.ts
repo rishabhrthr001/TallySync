@@ -287,6 +287,8 @@ router.post('/', authenticateToken, checkDailyBillLimit, async (req: any, res) =
       if (existing) return res.status(409).json({ error: 'Duplicate invoice detected', entry: existing });
     }
 
+    const safeItems = Array.isArray(items) ? items : [];
+
     const newEntry = new Entry({
       userId: req.user.id,
       companyName: req.user.companyName,
@@ -295,10 +297,10 @@ router.post('/', authenticateToken, checkDailyBillLimit, async (req: any, res) =
       partyGstin: req.body.partyGstin || '',
       invoiceNumber,
       date,
-      items,
-      taxableAmount,
-      taxAmount,
-      totalAmount,
+      items: safeItems,
+      taxableAmount: Number(taxableAmount) || 0,
+      taxAmount: Number(taxAmount) || 0,
+      totalAmount: Number(totalAmount) || 0,
       gstType: gstType || 'cgst-sgst',
       notes,
       transporterDetails,
@@ -326,14 +328,15 @@ router.post('/', authenticateToken, checkDailyBillLimit, async (req: any, res) =
       { upsert: true }
     );
 
-    // 2. Update Stock for each item
-    for (const lineItem of items) {
+    // 2. Update Stock for each item (if any items present)
+    for (const lineItem of safeItems) {
+      if (!lineItem || !lineItem.name || !lineItem.name.trim()) continue;
       const stockMultiplier = type === 'sales' ? -1 : 1; // Sales decreases stock, Purchase increases it
       await Item.findOneAndUpdate(
         { companyName: req.user.companyName, name: lineItem.name },
         { 
-          $inc: { stock: lineItem.quantity * stockMultiplier }, 
-          $set: { rate: lineItem.rate, updatedAt: new Date(), userId: req.user.id } 
+          $inc: { stock: (Number(lineItem.quantity) || 0) * stockMultiplier }, 
+          $set: { rate: Number(lineItem.rate) || 0, updatedAt: new Date(), userId: req.user.id } 
         },
         { upsert: true }
       );

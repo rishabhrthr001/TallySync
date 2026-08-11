@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Plus, Trash2, Save, Send, Printer, User, CreditCard, Upload, CheckCircle2, ExternalLink, Camera, Lock, Check, Crown } from 'lucide-react';
+import { 
+  Plus, Trash2, Save, Send, Printer, User, CreditCard, Upload, CheckCircle2, 
+  ExternalLink, Camera, Lock, Check, Crown, FileText, ShoppingBag, ShoppingCart, 
+  Receipt, Calculator, Sparkles, Percent 
+} from 'lucide-react';
 import Layout from '../components/Layout';
 import { useNavigate } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
@@ -19,11 +23,19 @@ interface ItemRow {
   amount: number;
 }
 
+export type EntryMode = 'sales' | 'purchase' | 'sales-no-item' | 'purchase-no-item';
+
 const CreateEntry: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { showToast } = useToast();
-  const [type, setType] = useState<'sales' | 'purchase'>('sales');
+  
+  // 4 Primary Modes: Sales (Items), Purchase (Items), Sales (No Item), Purchase (No Item)
+  const [entryMode, setEntryMode] = useState<EntryMode>('sales');
+  const isNoItem = entryMode === 'sales-no-item' || entryMode === 'purchase-no-item';
+  const type: 'sales' | 'purchase' = (entryMode === 'sales' || entryMode === 'sales-no-item') ? 'sales' : 'purchase';
+
+  // Form Fields
   const [partyName, setPartyName] = useState('');
   const [partyGstin, setPartyGstin] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState(`INV-${Date.now().toString().slice(-4)}`);
@@ -31,6 +43,13 @@ const CreateEntry: React.FC = () => {
   const [items, setItems] = useState<ItemRow[]>([{ name: '', quantity: 1, rate: 0, gst: 18, amount: 0 }]);
   const [gstType, setGstType] = useState<'cgst-sgst' | 'igst'>('cgst-sgst');
   const [notes, setNotes] = useState('');
+
+  // No-Item specific states
+  const [noItemTaxable, setNoItemTaxable] = useState<string>('');
+  const [noItemGstRate, setNoItemGstRate] = useState<number>(18);
+  const [noItemTaxAmount, setNoItemTaxAmount] = useState<string>('');
+  const [isTaxCustom, setIsTaxCustom] = useState<boolean>(false);
+
   const [loading, setLoading] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -91,7 +110,10 @@ const CreateEntry: React.FC = () => {
       
       const { data } = response.data;
       if (data) {
-        setReviewData(data);
+        setReviewData({
+          ...data,
+          entryMode: data.items && data.items.length > 0 ? (data.type || docType) : `${data.type || docType}-no-item`
+        });
         setShowReviewModal(true);
       }
     } catch (err: any) {
@@ -157,6 +179,15 @@ const CreateEntry: React.FC = () => {
   };
 
   const calculateTotals = () => {
+    if (isNoItem) {
+      const taxableAmount = Number(noItemTaxable) || 0;
+      const taxAmount = isTaxCustom && noItemTaxAmount !== ''
+        ? Number(noItemTaxAmount) || 0
+        : Number(((taxableAmount * noItemGstRate) / 100).toFixed(2));
+      const totalAmount = Number((taxableAmount + taxAmount).toFixed(2));
+      return { taxableAmount, taxAmount, totalAmount };
+    }
+
     let taxableAmount = 0;
     let taxAmount = 0;
     items.forEach(item => {
@@ -173,13 +204,25 @@ const CreateEntry: React.FC = () => {
   };
 
   const { taxableAmount, taxAmount, totalAmount } = calculateTotals();
+  const currentGstRate = isNoItem ? noItemGstRate : (items[0]?.gst || 18);
 
   // Print Setup
   const contentRef = useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({ contentRef, content: () => contentRef.current });
 
   const getInvoiceData = (): InvoiceData => ({
-    type, partyName, partyGstin, invoiceNumber, date, items, taxableAmount, taxAmount, totalAmount, gstType, notes, companyName: user?.companyName || ''
+    type, 
+    partyName, 
+    partyGstin, 
+    invoiceNumber, 
+    date, 
+    items: isNoItem ? [] : items, 
+    taxableAmount, 
+    taxAmount, 
+    totalAmount, 
+    gstType, 
+    notes, 
+    companyName: user?.companyName || ''
   });
 
   const handleSaveToTallyFromModal = async () => {
@@ -188,26 +231,29 @@ const CreateEntry: React.FC = () => {
       return;
     }
 
+    const isModalNoItem = reviewData.entryMode?.includes('no-item') || (!reviewData.items || reviewData.items.length === 0);
+    const resolvedType = reviewData.type || (reviewData.entryMode?.startsWith('sales') ? 'sales' : 'purchase');
+
     setLoading(true);
     try {
       const payload = {
-        type: reviewData.type || 'purchase',
+        type: resolvedType,
         partyName: reviewData.partyName,
         partyGstin: reviewData.partyGstin || '',
         invoiceNumber: reviewData.invoiceNumber,
         date: reviewData.date,
-        items: (reviewData.items || []).map((i: any) => ({
+        items: isModalNoItem ? [] : (reviewData.items || []).map((i: any) => ({
           name: i.name || 'Extracted Bill Item',
           quantity: Number(i.quantity) || 1,
           rate: Number(i.rate) || reviewData.taxableAmount,
           amount: Number(((Number(i.quantity) || 1) * (Number(i.rate) || reviewData.taxableAmount)).toFixed(2))
         })),
-        taxableAmount: reviewData.taxableAmount,
-        taxAmount: reviewData.taxAmount,
-        totalAmount: reviewData.totalAmount,
+        taxableAmount: Number(reviewData.taxableAmount) || 0,
+        taxAmount: Number(reviewData.taxAmount) || 0,
+        totalAmount: Number(reviewData.totalAmount) || 0,
         gstType: reviewData.gstType || 'cgst-sgst',
-        notes: reviewData.notes || 'Automatically parsed from PDF',
-        idempotencyKey: `${reviewData.type || 'purchase'}-${reviewData.invoiceNumber}-${Date.now()}`
+        notes: reviewData.notes || (isModalNoItem ? `Auto-parsed ${resolvedType} bill (No Item)` : 'Automatically parsed from PDF'),
+        idempotencyKey: `${resolvedType}-${reviewData.invoiceNumber}-${Date.now()}`
       };
 
       await axios.post('/api/entries', payload, {
@@ -223,6 +269,9 @@ const CreateEntry: React.FC = () => {
       setPartyGstin('');
       setInvoiceNumber(`INV-${Date.now().toString().slice(-4)}`);
       setItems([{ name: '', quantity: 1, rate: 0, gst: 18, amount: 0 }]);
+      setNoItemTaxable('');
+      setNoItemTaxAmount('');
+      setIsTaxCustom(false);
       setNotes('');
       setTimeout(() => setShowSuccess(false), 5000);
     } catch (err: any) {
@@ -237,23 +286,39 @@ const CreateEntry: React.FC = () => {
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!partyName || items.filter(i => i.name).length === 0) {
-      showToast("Please enter party name and at least one item.", 'error');
+    if (!partyName.trim()) {
+      showToast("Please enter party name.", 'error');
       return;
     }
 
-    // Safety check for totals
     const calc = calculateTotals();
-    if (Math.abs((calc.taxableAmount + calc.taxAmount) - calc.totalAmount) > 0.01) {
-      showToast("Calculation error detected. Please refresh the page.", 'error');
-      return;
+
+    if (isNoItem) {
+      if (calc.taxableAmount <= 0) {
+        showToast("Please enter a valid taxable value.", 'error');
+        return;
+      }
+    } else {
+      if (items.filter(i => i.name.trim()).length === 0) {
+        showToast("Please enter at least one item.", 'error');
+        return;
+      }
+      // Safety check for totals
+      if (Math.abs((calc.taxableAmount + calc.taxAmount) - calc.totalAmount) > 0.01) {
+        showToast("Calculation error detected. Please refresh the page.", 'error');
+        return;
+      }
     }
 
     setLoading(true);
     try {
       const payload = {
-        type, partyName, partyGstin, invoiceNumber, date, 
-        items: items.filter(i => i.name).map(i => ({
+        type, 
+        partyName, 
+        partyGstin, 
+        invoiceNumber, 
+        date, 
+        items: isNoItem ? [] : items.filter(i => i.name.trim()).map(i => ({
           ...i, 
           quantity: Number(i.quantity),
           rate: Number(i.rate),
@@ -263,7 +328,7 @@ const CreateEntry: React.FC = () => {
         taxAmount: calc.taxAmount, 
         totalAmount: calc.totalAmount, 
         gstType,
-        notes,
+        notes: notes || (isNoItem ? (type === 'sales' ? 'Sales Bill (No Item)' : 'Purchase Bill (No Item)') : ''),
         idempotencyKey: `${type}-${invoiceNumber}-${Date.now()}`
       };
 
@@ -277,6 +342,9 @@ const CreateEntry: React.FC = () => {
       setPartyGstin('');
       setInvoiceNumber(`INV-${Date.now().toString().slice(-4)}`);
       setItems([{ name: '', quantity: 1, rate: 0, gst: 18, amount: 0 }]);
+      setNoItemTaxable('');
+      setNoItemTaxAmount('');
+      setIsTaxCustom(false);
       setNotes('');
       setTimeout(() => setShowSuccess(false), 5000);
     } catch (err: any) {
@@ -291,36 +359,58 @@ const CreateEntry: React.FC = () => {
 
   return (
     <Layout>
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6 border-b border-slate-200/50 pb-6">
+      <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4 mb-6 border-b border-slate-200/50 pb-6">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tight">Rapid Billing</h2>
           <p className="text-slate-400 text-sm font-semibold mt-0.5">{user?.companyName} • Fast Invoice Engine</p>
         </div>
-        <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3 w-full lg:w-auto">
+          {/* 4 Mode Option Pills */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60">
             <button 
-              onClick={() => setType('sales')}
-              className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${type === 'sales' ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+              type="button"
+              onClick={() => setEntryMode('sales')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${entryMode === 'sales' ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
             >
+              <ShoppingBag className="w-3.5 h-3.5" />
               Sales Bill
             </button>
             <button 
-              onClick={() => setType('purchase')}
-              className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${type === 'purchase' ? 'bg-amber-500 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+              type="button"
+              onClick={() => setEntryMode('purchase')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${entryMode === 'purchase' ? 'bg-amber-500 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
             >
-              Purchase Entry
+              <ShoppingCart className="w-3.5 h-3.5" />
+              Purchase Bill
+            </button>
+            <button 
+              type="button"
+              onClick={() => setEntryMode('sales-no-item')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${entryMode === 'sales-no-item' ? 'bg-violet-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Sales (No Item)
+            </button>
+            <button 
+              type="button"
+              onClick={() => setEntryMode('purchase-no-item')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${entryMode === 'purchase-no-item' ? 'bg-emerald-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              Purchase (No Item)
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-            <label className={`cursor-pointer flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all text-white shadow-md ${uploadingPdf ? 'bg-slate-400' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'}`}>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <label className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all text-white shadow-md ${uploadingPdf ? 'bg-slate-400' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'}`}>
               <Upload className="h-4 w-4" />
-              {uploadingPdf ? 'Parsing...' : 'Upload Sales Bill PDF'}
+              {uploadingPdf ? 'Parsing...' : 'Upload Sales PDF'}
               <input type="file" accept=".pdf, image/*" className="hidden" onChange={(e) => handlePdfUpload(e, 'sales')} disabled={uploadingPdf} />
             </label>
 
-            <label className={`cursor-pointer flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all text-white shadow-md ${uploadingPdf ? 'bg-slate-400' : 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'}`}>
+            <label className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all text-white shadow-md ${uploadingPdf ? 'bg-slate-400' : 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/20'}`}>
               <Upload className="h-4 w-4" />
-              {uploadingPdf ? 'Parsing...' : 'Upload Purchase Bill PDF'}
+              {uploadingPdf ? 'Parsing...' : 'Upload Purchase PDF'}
               <input type="file" accept=".pdf, image/*" className="hidden" onChange={(e) => handlePdfUpload(e, 'purchase')} disabled={uploadingPdf} />
             </label>
           </div>
@@ -429,137 +519,292 @@ const CreateEntry: React.FC = () => {
               </div>
             </div>
 
-          <div className="bg-slate-50 rounded-2xl border border-slate-200/70 overflow-hidden">
-            <div className="hidden md:grid grid-cols-12 gap-4 p-4 border-b border-slate-200 bg-slate-100/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <div className="col-span-5">Item Name</div>
-              <div className="col-span-2 text-center">Qty</div>
-              <div className="col-span-2 text-center">Rate</div>
-              <div className="col-span-1 text-center">GST%</div>
-              <div className="col-span-2 text-right pr-4">Total</div>
-            </div>
-            
-            <div className="p-3 md:p-2 space-y-4 md:space-y-2">
-              {items.map((item, index) => (
-                <div key={index} className="flex flex-col md:grid md:grid-cols-12 gap-4 md:gap-3 md:items-center bg-white p-4 md:p-2 rounded-xl border border-slate-200 md:border-slate-100 shadow-sm hover:border-indigo-200 transition-colors">
-                  <div className="md:col-span-5 relative">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1.5 block">Item Name</label>
-                    <div className="flex items-center gap-1 bg-slate-50 md:bg-transparent rounded-t-sm border-b-2 border-transparent focus-within:border-indigo-400 transition-all focus-within:bg-indigo-50/30">
-                      <input 
-                        ref={index === items.length - 1 ? lastItemInputRef : null}
-                        required type="text" value={item.name} 
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          updateItem(index, 'name', val);
-                        }}
-                        onFocus={() => setActiveDropdown(index)}
-                        onBlur={() => setTimeout(() => setActiveDropdown(null), 200)}
-                        placeholder="Item name..."
-                        className="w-full px-3 py-2 text-sm font-bold text-slate-800 placeholder-slate-300 outline-none bg-transparent"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') { e.preventDefault(); lastItemInputRef.current?.blur(); }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const isProOrTrial = user?.isSuperAdmin || user?.subscription?.isUnlimited;
-                          if (!isProOrTrial) {
-                            showToast('🔒 AI Product Camera Scanner is a Pro feature (₹299/mo). Upgrade to Pro to unlock full potential!', 'error');
-                            setShowProModal(true);
-                            return;
-                          }
-                          setActiveRecognitionIndex(index);
-                          setIsRecognitionOpen(true);
-                        }}
-                        className="p-2 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
-                        title="AI Product Recognition"
-                      >
-                        <Camera className="w-4 h-4" />
-                      </button>
-                    </div>
-                    {activeDropdown === index && inventoryItems.length > 0 && (
-                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto overflow-x-hidden">
-                        {inventoryItems
-                          .filter(inv => (inv.name || '').toLowerCase().includes((item.name || '').toLowerCase()))
-                          .map((inv, i) => (
-                          <button
-                            type="button"
-                            key={i}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => {
-                              updateItem(index, 'name', inv.name);
-                              updateItem(index, 'rate', inv.rate);
-                              updateItem(index, 'gst', inv.gst || 18);
-                              setActiveDropdown(null);
-                            }}
-                            className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition-colors flex justify-between items-center group border-b border-slate-50 last:border-0"
-                          >
-                            <span className="font-semibold text-slate-700 group-hover:text-indigo-700 truncate mr-2">{inv.name}</span>
-                            <div className="flex flex-col items-end text-xs whitespace-nowrap">
-                              <span className="font-mono font-bold text-indigo-600">{formatCurrency(inv.rate)}</span>
-                              <span className="text-slate-400">GST {inv.gst}%</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+          {isNoItem ? (
+            /* No-Item Pure Accounting Calculation Section */
+            <div className="bg-gradient-to-br from-slate-50 to-indigo-50/40 rounded-3xl border-2 border-indigo-100 p-6 md:p-7 space-y-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-indigo-100">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-2xl text-white shadow-md ${type === 'sales' ? 'bg-violet-600 shadow-violet-200' : 'bg-emerald-600 shadow-emerald-200'}`}>
+                    <Calculator className="w-5 h-5" />
                   </div>
-                  
-                  <div className="grid grid-cols-3 md:contents gap-3 w-full">
-                    <div className="md:col-span-2 flex-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1.5 block text-center">Qty</label>
-                      <input 
-                        required type="number" min="1" value={item.quantity === 0 ? '' : item.quantity} 
-                        onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
-                        className="w-full px-2 py-2 text-center text-sm font-bold text-slate-800 outline-none border-b-2 border-transparent focus:border-indigo-400 bg-slate-50 focus:bg-white rounded"
-                      />
-                    </div>
-                    <div className="md:col-span-2 flex-1 relative">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1.5 block text-center">Rate</label>
-                      <span className="absolute left-2 top-[30px] md:top-2.5 text-[10px] text-slate-400 font-bold hidden md:block">INR</span>
-                      <input 
-                        required type="number" value={item.rate === 0 ? '' : item.rate} 
-                        onChange={(e) => updateItem(index, 'rate', parseFloat(e.target.value) || 0)}
-                        className="w-full px-2 md:pl-6 md:pr-2 py-2 text-center md:text-left text-sm font-bold text-slate-800 outline-none border-b-2 border-transparent focus:border-indigo-400 bg-slate-50 focus:bg-white rounded"
-                      />
-                    </div>
-                    <div className="md:col-span-1 flex-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1.5 block text-center">GST%</label>
-                      <input 
-                        required type="number" value={item.gst} 
-                        onChange={(e) => updateItem(index, 'gst', parseFloat(e.target.value) || 0)}
-                        className="w-full px-1 py-2 text-center text-sm font-bold text-slate-600 outline-none border-b-2 border-transparent focus:border-indigo-400 bg-slate-50 focus:bg-white rounded"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="md:col-span-2 flex justify-between items-center md:pl-2 mt-2 md:mt-0 pt-4 md:pt-0 border-t border-slate-100 md:border-t-0">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1 block">Line Total</span>
-                      <div className="text-sm font-black text-slate-900 font-mono">
-                        {formatCurrency(item.amount)}
-                      </div>
-                    </div>
-                    <button 
-                      type="button" onClick={() => removeItemRow(index)}
-                      className="p-2 md:p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 bg-slate-50 md:bg-transparent rounded-lg transition-colors focus:outline-none"
-                    >
-                      <Trash2 className="h-5 w-5 md:h-4 md:w-4" />
-                    </button>
+                  <div>
+                    <h4 className="text-base font-black text-slate-900 tracking-tight">
+                      {type === 'sales' ? 'Sales Bill (No Item)' : 'Purchase Bill (No Item)'}
+                    </h4>
+                    <p className="text-xs font-semibold text-slate-500">
+                      Accounting invoice without stock inventory • Taxable amount & GST only
+                    </p>
                   </div>
                 </div>
-              ))}
-            </div>
+                <span className={`self-start sm:self-auto px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider border ${
+                  type === 'sales' ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}>
+                  Accounting Voucher View
+                </span>
+              </div>
 
-            <div className="p-4 bg-slate-50/50 border-t border-slate-200">
-              <button 
-                type="button" onClick={addItemRow}
-                className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-4 py-2.5 rounded-xl transition-all w-fit"
-              >
-                <Plus className="h-4 w-4 stroke-[3]" /> Add Row (Tab)
-              </button>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
+                {/* Taxable Value Input */}
+                <div className="md:col-span-6 space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">
+                    Taxable Amount (₹) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-3.5 text-base font-black text-slate-400 font-mono">₹</span>
+                    <input 
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      placeholder="0.00"
+                      value={noItemTaxable}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNoItemTaxable(val);
+                        if (!isTaxCustom) {
+                          const num = parseFloat(val) || 0;
+                          setNoItemTaxAmount(((num * noItemGstRate) / 100).toFixed(2));
+                        }
+                      }}
+                      className="w-full pl-9 pr-4 py-3.5 bg-white border-2 border-indigo-200/80 rounded-2xl text-lg font-black font-mono text-slate-900 focus:border-indigo-600 outline-none shadow-sm transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* GST Rate Preset Chips */}
+                <div className="md:col-span-6 space-y-2">
+                  <div className="flex justify-between items-center ml-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">
+                      GST Rate (%)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsTaxCustom(!isTaxCustom)}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+                    >
+                      {isTaxCustom ? 'Use Presets' : 'Custom Tax'}
+                    </button>
+                  </div>
+                  
+                  {isTaxCustom ? (
+                    <div className="relative">
+                      <span className="absolute left-4 top-3.5 text-xs font-black text-slate-400 font-mono">₹</span>
+                      <input 
+                        type="number"
+                        step="0.01"
+                        placeholder="Enter custom GST amount..."
+                        value={noItemTaxAmount}
+                        onChange={(e) => setNoItemTaxAmount(e.target.value)}
+                        className="w-full pl-8 pr-4 py-3.5 bg-white border-2 border-indigo-200/80 rounded-2xl text-sm font-bold font-mono text-slate-800 focus:border-indigo-600 outline-none shadow-sm transition-all"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-1.5 bg-white p-1.5 rounded-2xl border border-slate-200">
+                      {[0, 5, 12, 18, 28].map((rate) => (
+                        <button
+                          key={rate}
+                          type="button"
+                          onClick={() => {
+                            setNoItemGstRate(rate);
+                            setIsTaxCustom(false);
+                            const num = parseFloat(noItemTaxable) || 0;
+                            setNoItemTaxAmount(((num * rate) / 100).toFixed(2));
+                          }}
+                          className={`flex-1 min-w-[40px] py-2 rounded-xl text-xs font-black transition-all ${
+                            !isTaxCustom && noItemGstRate === rate
+                              ? 'bg-indigo-600 text-white shadow-md'
+                              : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {rate}%
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Live Computed Tax Breakdown Box */}
+              <div className="bg-white rounded-2xl border border-indigo-100 p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-2">
+                  <span>Tax Calculation Details</span>
+                  <span className="text-indigo-600 font-bold font-mono">GST Rate: {isTaxCustom ? 'Custom' : `${noItemGstRate}%`}</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {gstType === 'cgst-sgst' ? (
+                    <>
+                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/60 flex justify-between items-center">
+                        <span className="text-[11px] font-bold text-slate-500 uppercase">
+                          CGST ({noItemGstRate / 2}%)
+                        </span>
+                        <span className="text-sm font-black text-slate-900 font-mono">
+                          {formatCurrency(taxAmount / 2)}
+                        </span>
+                      </div>
+                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/60 flex justify-between items-center">
+                        <span className="text-[11px] font-bold text-slate-500 uppercase">
+                          SGST ({noItemGstRate / 2}%)
+                        </span>
+                        <span className="text-sm font-black text-slate-900 font-mono">
+                          {formatCurrency(taxAmount / 2)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="sm:col-span-2 p-3.5 bg-slate-50 rounded-xl border border-slate-200/60 flex justify-between items-center">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase">
+                        IGST ({noItemGstRate}%)
+                      </span>
+                      <span className="text-sm font-black text-slate-900 font-mono">
+                        {formatCurrency(taxAmount)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex justify-between items-center text-sm">
+                  <span className="font-bold text-slate-700">Calculated Invoice Total</span>
+                  <span className="font-black text-indigo-600 font-mono text-lg">
+                    {formatCurrency(totalAmount)}
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            /* Itemized Items Table */
+            <div className="bg-slate-50 rounded-2xl border border-slate-200/70 overflow-hidden">
+              <div className="hidden md:grid grid-cols-12 gap-4 p-4 border-b border-slate-200 bg-slate-100/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                <div className="col-span-5">Item Name</div>
+                <div className="col-span-2 text-center">Qty</div>
+                <div className="col-span-2 text-center">Rate</div>
+                <div className="col-span-1 text-center">GST%</div>
+                <div className="col-span-2 text-right pr-4">Total</div>
+              </div>
+              
+              <div className="p-3 md:p-2 space-y-4 md:space-y-2">
+                {items.map((item, index) => (
+                  <div key={index} className="flex flex-col md:grid md:grid-cols-12 gap-4 md:gap-3 md:items-center bg-white p-4 md:p-2 rounded-xl border border-slate-200 md:border-slate-100 shadow-sm hover:border-indigo-200 transition-colors">
+                    <div className="md:col-span-5 relative">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1.5 block">Item Name</label>
+                      <div className="flex items-center gap-1 bg-slate-50 md:bg-transparent rounded-t-sm border-b-2 border-transparent focus-within:border-indigo-400 transition-all focus-within:bg-indigo-50/30">
+                        <input 
+                          ref={index === items.length - 1 ? lastItemInputRef : null}
+                          required type="text" value={item.name} 
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateItem(index, 'name', val);
+                          }}
+                          onFocus={() => setActiveDropdown(index)}
+                          onBlur={() => setTimeout(() => setActiveDropdown(null), 200)}
+                          placeholder="Item name..."
+                          className="w-full px-3 py-2 text-sm font-bold text-slate-800 placeholder-slate-300 outline-none bg-transparent"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); lastItemInputRef.current?.blur(); }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isProOrTrial = user?.isSuperAdmin || user?.subscription?.isUnlimited;
+                            if (!isProOrTrial) {
+                              showToast('🔒 AI Product Camera Scanner is a Pro feature (₹299/mo). Upgrade to Pro to unlock full potential!', 'error');
+                              setShowProModal(true);
+                              return;
+                            }
+                            setActiveRecognitionIndex(index);
+                            setIsRecognitionOpen(true);
+                          }}
+                          className="p-2 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                          title="AI Product Recognition"
+                        >
+                          <Camera className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {activeDropdown === index && inventoryItems.length > 0 && (
+                        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto overflow-x-hidden">
+                          {inventoryItems
+                            .filter(inv => (inv.name || '').toLowerCase().includes((item.name || '').toLowerCase()))
+                            .map((inv, i) => (
+                            <button
+                              type="button"
+                              key={i}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                updateItem(index, 'name', inv.name);
+                                updateItem(index, 'rate', inv.rate);
+                                updateItem(index, 'gst', inv.gst || 18);
+                                setActiveDropdown(null);
+                              }}
+                              className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition-colors flex justify-between items-center group border-b border-slate-50 last:border-0"
+                            >
+                              <span className="font-semibold text-slate-700 group-hover:text-indigo-700 truncate mr-2">{inv.name}</span>
+                              <div className="flex flex-col items-end text-xs whitespace-nowrap">
+                                <span className="font-mono font-bold text-indigo-600">{formatCurrency(inv.rate)}</span>
+                                <span className="text-slate-400">GST {inv.gst}%</span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="grid grid-cols-3 md:contents gap-3 w-full">
+                      <div className="md:col-span-2 flex-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1.5 block text-center">Qty</label>
+                        <input 
+                          required type="number" min="1" value={item.quantity === 0 ? '' : item.quantity} 
+                          onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                          className="w-full px-2 py-2 text-center text-sm font-bold text-slate-800 outline-none border-b-2 border-transparent focus:border-indigo-400 bg-slate-50 focus:bg-white rounded"
+                        />
+                      </div>
+                      <div className="md:col-span-2 flex-1 relative">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1.5 block text-center">Rate</label>
+                        <span className="absolute left-2 top-[30px] md:top-2.5 text-[10px] text-slate-400 font-bold hidden md:block">INR</span>
+                        <input 
+                          required type="number" value={item.rate === 0 ? '' : item.rate} 
+                          onChange={(e) => updateItem(index, 'rate', parseFloat(e.target.value) || 0)}
+                          className="w-full px-2 md:pl-6 md:pr-2 py-2 text-center md:text-left text-sm font-bold text-slate-800 outline-none border-b-2 border-transparent focus:border-indigo-400 bg-slate-50 focus:bg-white rounded"
+                        />
+                      </div>
+                      <div className="md:col-span-1 flex-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1.5 block text-center">GST%</label>
+                        <input 
+                          required type="number" value={item.gst} 
+                          onChange={(e) => updateItem(index, 'gst', parseFloat(e.target.value) || 0)}
+                          className="w-full px-1 py-2 text-center text-sm font-bold text-slate-600 outline-none border-b-2 border-transparent focus:border-indigo-400 bg-slate-50 focus:bg-white rounded"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="md:col-span-2 flex justify-between items-center md:pl-2 mt-2 md:mt-0 pt-4 md:pt-0 border-t border-slate-100 md:border-t-0">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase md:hidden mb-1 block">Line Total</span>
+                        <div className="text-sm font-black text-slate-900 font-mono">
+                          {formatCurrency(item.amount)}
+                        </div>
+                      </div>
+                      <button 
+                        type="button" onClick={() => removeItemRow(index)}
+                        className="p-2 md:p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 bg-slate-50 md:bg-transparent rounded-lg transition-colors focus:outline-none"
+                      >
+                        <Trash2 className="h-5 w-5 md:h-4 md:w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 bg-slate-50/50 border-t border-slate-200">
+                <button 
+                  type="button" onClick={addItemRow}
+                  className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-4 py-2.5 rounded-xl transition-all w-fit"
+                >
+                  <Plus className="h-4 w-4 stroke-[3]" /> Add Row (Tab)
+                </button>
+              </div>
+            </div>
+          )}
         </form>
 
         {/* Right Preview & Sidebar Column */}
@@ -568,7 +813,12 @@ const CreateEntry: React.FC = () => {
             <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500 rounded-full blur-3xl opacity-20 -mr-10 -mt-10 pointer-events-none"></div>
             
             <div>
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Voucher Summary</h3>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Voucher Summary</h3>
+                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">
+                  {isNoItem ? (type === 'sales' ? 'Sales (No Item)' : 'Purchase (No Item)') : (type === 'sales' ? 'Sales Bill' : 'Purchase Bill')}
+                </span>
+              </div>
               <div className="space-y-3">
                 <div className="flex justify-between text-slate-300 font-medium text-sm">
                   <span>Taxable Value</span>
@@ -577,17 +827,17 @@ const CreateEntry: React.FC = () => {
                 {gstType === 'cgst-sgst' ? (
                   <>
                     <div className="flex justify-between text-slate-350 font-medium text-sm">
-                      <span>CGST ({(items[0]?.gst || 18)/2}%)</span>
+                      <span>CGST ({(currentGstRate)/2}%)</span>
                       <span className="font-mono">{formatCurrency(taxAmount / 2)}</span>
                     </div>
                     <div className="flex justify-between text-slate-350 font-medium text-sm">
-                      <span>SGST ({(items[0]?.gst || 18)/2}%)</span>
+                      <span>SGST ({(currentGstRate)/2}%)</span>
                       <span className="font-mono">{formatCurrency(taxAmount / 2)}</span>
                     </div>
                   </>
                 ) : (
                   <div className="flex justify-between text-slate-350 font-medium text-sm">
-                    <span>IGST ({items[0]?.gst || 18}%)</span>
+                    <span>IGST ({currentGstRate}%)</span>
                     <span className="font-mono">{formatCurrency(taxAmount)}</span>
                   </div>
                 )}
@@ -697,39 +947,53 @@ const CreateEntry: React.FC = () => {
               {/* Type and GST Treatment Row */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Voucher Type</label>
-                  <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200/50 w-full">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Voucher Type & Mode</label>
+                  <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/50 w-full">
                     <button 
                       type="button"
-                      onClick={() => setReviewData({ ...reviewData, type: 'sales' })}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${reviewData.type === 'sales' ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                      onClick={() => setReviewData({ ...reviewData, type: 'sales', entryMode: 'sales' })}
+                      className={`py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${reviewData.entryMode === 'sales' || (!reviewData.entryMode && reviewData.type === 'sales') ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
                     >
                       Sales Bill
                     </button>
                     <button 
                       type="button"
-                      onClick={() => setReviewData({ ...reviewData, type: 'purchase' })}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${reviewData.type === 'purchase' ? 'bg-amber-500 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                      onClick={() => setReviewData({ ...reviewData, type: 'purchase', entryMode: 'purchase' })}
+                      className={`py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${reviewData.entryMode === 'purchase' || (!reviewData.entryMode && reviewData.type === 'purchase') ? 'bg-amber-500 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
                     >
                       Purchase Entry
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setReviewData({ ...reviewData, type: 'sales', entryMode: 'sales-no-item' })}
+                      className={`py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${reviewData.entryMode === 'sales-no-item' ? 'bg-violet-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      Sales (No Item)
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setReviewData({ ...reviewData, type: 'purchase', entryMode: 'purchase-no-item' })}
+                      className={`py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${reviewData.entryMode === 'purchase-no-item' ? 'bg-emerald-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      Purchase (No Item)
                     </button>
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">GST Treatment</label>
-                  <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200/50 w-full">
+                  <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200/50 w-full h-[88px] items-center">
                     <button 
                       type="button"
                       onClick={() => setReviewData({ ...reviewData, gstType: 'cgst-sgst' })}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${reviewData.gstType === 'cgst-sgst' ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                      className={`flex-1 py-3.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${reviewData.gstType === 'cgst-sgst' ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
                     >
                       Intrastate (CGST + SGST)
                     </button>
                     <button 
                       type="button"
                       onClick={() => setReviewData({ ...reviewData, gstType: 'igst' })}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${reviewData.gstType === 'igst' ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                      className={`flex-1 py-3.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${reviewData.gstType === 'igst' ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-500 hover:text-slate-800'}`}
                     >
                       Interstate (IGST)
                     </button>
@@ -865,135 +1129,149 @@ const CreateEntry: React.FC = () => {
                 </div>
               </div>
 
-              {/* Items Table */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Extracted Line Items & Inventory Matching</label>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Fuzzy Matching Active</span>
+              {/* Items Table or No-Item Banner */}
+              {reviewData.entryMode === 'sales-no-item' || reviewData.entryMode === 'purchase-no-item' ? (
+                <div className="p-5 bg-gradient-to-r from-violet-50 to-indigo-50 border border-indigo-100 rounded-2xl flex items-center gap-3.5 shadow-sm">
+                  <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md shadow-indigo-200 shrink-0">
+                    <Calculator className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900">No-Item Bill (Pure Accounting Voucher)</h4>
+                    <p className="text-xs font-semibold text-slate-500 mt-0.5">
+                      This entry will be synced to Tally with Party, Sales/Purchase, and GST ledgers only. No stock item master or inventory quantities will be touched.
+                    </p>
+                  </div>
                 </div>
-                <div className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-100/50 border-b border-slate-200">
-                      <tr>
-                        <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Extracted Item & Match Status</th>
-                        <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center w-24">Qty</th>
-                        <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center w-32">Rate</th>
-                        <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right w-32">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {(reviewData.items || []).map((item: any, idx: number) => (
-                        <tr key={idx} className="bg-white">
-                          <td className="px-4 py-3 space-y-1.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <input 
-                                type="text" 
-                                value={item.name}
-                                onChange={(e) => {
-                                  const newItems = [...reviewData.items];
-                                  newItems[idx].name = e.target.value;
-                                  setReviewData({ ...reviewData, items: newItems });
-                                }}
-                                className="w-full bg-transparent font-bold text-slate-800 outline-none focus:text-indigo-600 transition-colors text-sm"
-                                placeholder="Item name..."
-                              />
-                              {item.matched ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                                  ✓ Matched
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
-                                  Unmatched
-                                </span>
-                              )}
-                            </div>
-                            
-                            {item.originalExtractedName && item.originalExtractedName !== item.name && (
-                              <p className="text-[10px] font-mono text-slate-400">PDF text: "{item.originalExtractedName}"</p>
-                            )}
-
-                            {/* Inventory Manual Picker Dropdown for Unmatched or changing match */}
-                            <div className="pt-1">
-                              <select
-                                value={inventoryItems.some(inv => inv.name === item.name) ? item.name : ''}
-                                onChange={(e) => {
-                                  const selectedName = e.target.value;
-                                  if (!selectedName) return;
-                                  const inv = inventoryItems.find(i => i.name === selectedName);
-                                  const newItems = [...reviewData.items];
-                                  newItems[idx].name = selectedName;
-                                  if (inv) {
-                                    newItems[idx].rate = Number(inv.rate) || newItems[idx].rate;
-                                    newItems[idx].gst = Number(inv.gst) || 18;
-                                    newItems[idx].amount = Number((newItems[idx].quantity * newItems[idx].rate).toFixed(2));
-                                  }
-                                  newItems[idx].matched = true;
-                                  setReviewData({ ...reviewData, items: newItems });
-                                }}
-                                className="w-full text-[11px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 outline-none focus:border-indigo-400 cursor-pointer"
-                              >
-                                <option value="">-- {item.matched ? 'Change matched inventory item' : 'Select matching item from inventory...'} --</option>
-                                {inventoryItems.map((inv: any, i: number) => (
-                                  <option key={i} value={inv.name}>
-                                    {inv.name} (₹{inv.rate} • GST {inv.gst || 18}%)
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 align-top pt-4">
-                            <input 
-                              type="number" 
-                              value={item.quantity}
-                              onChange={(e) => {
-                                const newItems = [...reviewData.items];
-                                newItems[idx].quantity = parseFloat(e.target.value) || 0;
-                                newItems[idx].amount = Number((newItems[idx].quantity * newItems[idx].rate).toFixed(2));
-                                const newTaxable = newItems.reduce((sum: number, it: any) => sum + (it.quantity * it.rate), 0);
-                                const newTax = Number((newTaxable * 0.18).toFixed(2));
-                                const newTotal = Number((newTaxable + newTax).toFixed(2));
-                                setReviewData({
-                                  ...reviewData,
-                                  items: newItems,
-                                  taxableAmount: newTaxable,
-                                  taxAmount: newTax,
-                                  totalAmount: newTotal
-                                });
-                              }}
-                              className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                            />
-                          </td>
-                          <td className="px-4 py-3 align-top pt-4">
-                            <input 
-                              type="number" 
-                              value={item.rate}
-                              onChange={(e) => {
-                                const newItems = [...reviewData.items];
-                                newItems[idx].rate = parseFloat(e.target.value) || 0;
-                                newItems[idx].amount = Number((newItems[idx].quantity * newItems[idx].rate).toFixed(2));
-                                const newTaxable = newItems.reduce((sum: number, it: any) => sum + (it.quantity * it.rate), 0);
-                                const newTax = Number((newTaxable * 0.18).toFixed(2));
-                                const newTotal = Number((newTaxable + newTax).toFixed(2));
-                                setReviewData({
-                                  ...reviewData,
-                                  items: newItems,
-                                  taxableAmount: newTaxable,
-                                  taxAmount: newTax,
-                                  totalAmount: newTotal
-                                });
-                              }}
-                              className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                            />
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono font-black text-slate-900 align-top pt-4">
-                            {formatCurrency(item.quantity * item.rate)}
-                          </td>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Extracted Line Items & Inventory Matching</label>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Fuzzy Matching Active</span>
+                  </div>
+                  <div className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
+                    <table className="w-full text-left">
+                      <thead className="bg-slate-100/50 border-b border-slate-200">
+                        <tr>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Extracted Item & Match Status</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center w-24">Qty</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center w-32">Rate</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right w-32">Amount</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(reviewData.items || []).map((item: any, idx: number) => (
+                          <tr key={idx} className="bg-white">
+                            <td className="px-4 py-3 space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <input 
+                                  type="text" 
+                                  value={item.name}
+                                  onChange={(e) => {
+                                    const newItems = [...reviewData.items];
+                                    newItems[idx].name = e.target.value;
+                                    setReviewData({ ...reviewData, items: newItems });
+                                  }}
+                                  className="w-full bg-transparent font-bold text-slate-800 outline-none focus:text-indigo-600 transition-colors text-sm"
+                                  placeholder="Item name..."
+                                />
+                                {item.matched ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                                    ✓ Matched
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
+                                    Unmatched
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {item.originalExtractedName && item.originalExtractedName !== item.name && (
+                                <p className="text-[10px] font-mono text-slate-400">PDF text: "{item.originalExtractedName}"</p>
+                              )}
+
+                              {/* Inventory Manual Picker Dropdown for Unmatched or changing match */}
+                              <div className="pt-1">
+                                <select
+                                  value={inventoryItems.some(inv => inv.name === item.name) ? item.name : ''}
+                                  onChange={(e) => {
+                                    const selectedName = e.target.value;
+                                    if (!selectedName) return;
+                                    const inv = inventoryItems.find(i => i.name === selectedName);
+                                    const newItems = [...reviewData.items];
+                                    newItems[idx].name = selectedName;
+                                    if (inv) {
+                                      newItems[idx].rate = Number(inv.rate) || newItems[idx].rate;
+                                      newItems[idx].gst = Number(inv.gst) || 18;
+                                      newItems[idx].amount = Number((newItems[idx].quantity * newItems[idx].rate).toFixed(2));
+                                    }
+                                    newItems[idx].matched = true;
+                                    setReviewData({ ...reviewData, items: newItems });
+                                  }}
+                                  className="w-full text-[11px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 outline-none focus:border-indigo-400 cursor-pointer"
+                                >
+                                  <option value="">-- {item.matched ? 'Change matched inventory item' : 'Select matching item from inventory...'} --</option>
+                                  {inventoryItems.map((inv: any, i: number) => (
+                                    <option key={i} value={inv.name}>
+                                      {inv.name} (₹{inv.rate} • GST {inv.gst || 18}%)
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 align-top pt-4">
+                              <input 
+                                type="number" 
+                                value={item.quantity}
+                                onChange={(e) => {
+                                  const newItems = [...reviewData.items];
+                                  newItems[idx].quantity = parseFloat(e.target.value) || 0;
+                                  newItems[idx].amount = Number((newItems[idx].quantity * newItems[idx].rate).toFixed(2));
+                                  const newTaxable = newItems.reduce((sum: number, it: any) => sum + (it.quantity * it.rate), 0);
+                                  const newTax = Number((newTaxable * 0.18).toFixed(2));
+                                  const newTotal = Number((newTaxable + newTax).toFixed(2));
+                                  setReviewData({
+                                    ...reviewData,
+                                    items: newItems,
+                                    taxableAmount: newTaxable,
+                                    taxAmount: newTax,
+                                    totalAmount: newTotal
+                                  });
+                                }}
+                                className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
+                              />
+                            </td>
+                            <td className="px-4 py-3 align-top pt-4">
+                              <input 
+                                type="number" 
+                                value={item.rate}
+                                onChange={(e) => {
+                                  const newItems = [...reviewData.items];
+                                  newItems[idx].rate = parseFloat(e.target.value) || 0;
+                                  newItems[idx].amount = Number((newItems[idx].quantity * newItems[idx].rate).toFixed(2));
+                                  const newTaxable = newItems.reduce((sum: number, it: any) => sum + (it.quantity * it.rate), 0);
+                                  const newTax = Number((newTaxable * 0.18).toFixed(2));
+                                  const newTotal = Number((newTaxable + newTax).toFixed(2));
+                                  setReviewData({
+                                    ...reviewData,
+                                    items: newItems,
+                                    taxableAmount: newTaxable,
+                                    taxAmount: newTax,
+                                    totalAmount: newTotal
+                                  });
+                                }}
+                                className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono font-black text-slate-900 align-top pt-4">
+                              {formatCurrency(item.quantity * item.rate)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Narration / Notes */}
               <div className="space-y-2">
