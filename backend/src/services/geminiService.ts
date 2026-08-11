@@ -44,7 +44,7 @@ const productExtractionSchema = {
  */
 export async function extractProductDetails(base64Image: string): Promise<ExtractedProductInfo> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     // Parse base64 string to inlineData structure
     const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
@@ -250,10 +250,10 @@ GENERAL INSTRUCTIONS:
     return JSON.parse(responseText) as ExtractedInvoiceInfo;
   } catch (error: any) {
     console.error('Gemini invoice extraction error:', error);
-    // Fallback to gemini-2.5-flash if 1.5-pro hits any unexpected issue
+    // Fallback to gemini-1.5-flash if 1.5-pro hits any unexpected issue
     try {
-      console.log('Retrying with gemini-2.5-flash fallback...');
-      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      console.log('Retrying with gemini-1.5-flash fallback...');
+      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
       const docPart = { inlineData: { data: buffer.toString('base64'), mimeType } };
       const fallbackPrompt = `Extract invoice details as JSON. Document type: ${docType}. Extract partyName (${docType === 'purchase' ? 'Supplier/Vendor' : 'Buyer/Customer'}), partyGstin, invoiceNumber, date (YYYY-MM-DD), items (clean name without batch lines), taxableAmount, taxAmount, totalAmount, gstType.`;
       const fallbackResult = await fallbackModel.generateContent({
@@ -371,8 +371,8 @@ Instructions:
   } catch (error: any) {
     console.error('Gemini bank statement extraction error:', error);
     try {
-      console.log('Retrying bank statement extraction with gemini-2.5-flash fallback...');
-      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      console.log('Retrying bank statement extraction with gemini-1.5-flash fallback...');
+      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
       const docPart = { inlineData: { data: buffer.toString('base64'), mimeType } };
       const fallbackPrompt = `Extract all transactions from this bank statement as JSON with date, voucherType (Payment/Receipt/Contra/Journal), partyName, amount, narration, referenceNumber, confidence, reason.`;
       const fallbackResult = await fallbackModel.generateContent({
