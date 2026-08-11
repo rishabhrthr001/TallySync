@@ -19,13 +19,19 @@ router.post('/search', authenticateToken, checkProFeatureAccess, async (req: any
     console.log('Query image uploaded to Cloudinary:', imageUrl);
 
     // 2. Process recognition using Gemini Vision and match in DB
-    const { matches, threshold } = await searchProductsByImage(image, req.user.companyName);
+    const { matches, threshold, detectedProduct, totalInventoryCount } = await searchProductsByImage(
+      image,
+      req.user.companyName,
+      req.user.id
+    );
 
     res.json({
       success: true,
       imageUrl,
       matches,
-      threshold
+      threshold,
+      detectedProduct,
+      totalInventoryCount
     });
   } catch (error: any) {
     console.error('AI Recognition search error:', error);
