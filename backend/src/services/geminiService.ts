@@ -39,6 +39,132 @@ const productExtractionSchema = {
   required: ['productName', 'brand', 'category']
 };
 
+// Strict JSON schema constraints for inventory-first matching
+const inventoryMatchingSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    detectedProduct: {
+      type: SchemaType.OBJECT,
+      properties: {
+        productName: { type: SchemaType.STRING, description: 'Visual name of the product seen in the photo (e.g. Wireless Earbuds Charging Case, iPhone, Fertilizer Bag).' },
+        brand: { type: SchemaType.STRING, description: 'Brand if visible.' },
+        category: { type: SchemaType.STRING, description: 'General category.' },
+        distinctiveFeatures: { type: SchemaType.STRING, description: 'Color, packaging type, shape, or distinctive attributes.' }
+      },
+      required: ['productName']
+    },
+    matches: {
+      type: SchemaType.ARRAY,
+      description: 'List of matching inventory items from the provided catalog, ordered by highest match confidence.',
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          id: { type: SchemaType.STRING, description: 'The exact _id of the matched inventory item from the catalog.' },
+          confidence: { type: SchemaType.NUMBER, description: 'Match confidence percentage (0 to 100). E.g. 90-98 for direct visual match, 70-89 for related variant/category match.' },
+          reason: { type: SchemaType.STRING, description: 'Brief explanation why this inventory item matches.' }
+        },
+        required: ['id', 'confidence']
+      }
+    }
+  },
+  required: ['detectedProduct', 'matches']
+};
+
+export interface InventoryMatchingResult {
+  detectedProduct: {
+    productName: string;
+    brand?: string;
+    category?: string;
+    distinctiveFeatures?: string;
+  };
+  matches: Array<{
+    id: string;
+    confidence: number;
+    reason?: string;
+  }>;
+}
+
+/**
+ * Compares a captured product image directly against the company's full inventory catalog using Gemini Vision AI.
+ */
+export async function matchProductWithInventoryCatalog(
+  base64Image: string,
+  inventoryCatalog: Array<{ _id: string; name: string; category?: string; sku?: string; rate?: number }>
+): Promise<InventoryMatchingResult> {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
+
+    // Parse base64 string to inlineData structure
+    const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    const mimeType = matches ? matches[1] : 'image/jpeg';
+    const base64Data = matches ? matches[2] : base64Image;
+
+    const imagePart = {
+      inlineData: {
+        data: base64Data,
+        mimeType
+      }
+    };
+
+    const catalogSnippet = JSON.stringify(
+      inventoryCatalog.map(item => ({
+        id: item._id.toString(),
+        name: item.name,
+        category: item.category || 'General',
+        sku: item.sku || ''
+      })),
+      null,
+      2
+    );
+
+    const prompt = `You are an expert AI product recognition and inventory matching assistant for a retail and billing system.
+
+TASK:
+1. Examine the product image carefully and identify what product/item is shown (name, brand, category, visual features).
+2. Match the product in the image against the COMPANY INVENTORY CATALOG provided below:
+   - Identify which inventory items visually, semantically, or functionally represent this product (e.g. if the image shows earphone cases/earbuds and an inventory item is named "Airpods" or "OnePlus Case" or similar audio/mobile accessories, match them with high confidence).
+   - If an item in the catalog is the same product or a visual counterpart, assign a high confidence match score (e.g. 75% to 98%).
+   - Only return inventory items from the catalog that match with a confidence score > 50%.
+   - If none of the items in the catalog match this product with > 50% confidence, return an empty "matches" array.
+
+COMPANY INVENTORY CATALOG (${inventoryCatalog.length} items):
+${catalogSnippet}
+
+Return the extracted product details and any matched inventory items strictly following the JSON schema.`;
+
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            imagePart
+          ]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: inventoryMatchingSchema as any
+      }
+    });
+
+    const responseText = result.response.text();
+    if (!responseText) {
+      throw new Error('Gemini Vision returned empty content.');
+    }
+
+    return JSON.parse(responseText) as InventoryMatchingResult;
+  } catch (error: any) {
+    console.error('Gemini inventory catalog matching error:', error);
+    // Fallback to basic extraction if catalog matching fails
+    const basic = await extractProductDetails(base64Image);
+    return {
+      detectedProduct: basic,
+      matches: []
+    };
+  }
+}
+
 /**
  * Extracts structured product details from a base64 encoded image using Gemini Vision.
  */
