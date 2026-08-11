@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { 
   TrendingUp, TrendingDown, DollarSign, Package, CreditCard, Plus, ArrowUpRight, ArrowDownRight, Sparkles, RefreshCcw,
-  Printer, CheckCircle2, Clock, XCircle, Trash2, Check
+  Printer, CheckCircle2, Clock, XCircle, Trash2, Check, RotateCcw
 } from 'lucide-react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
@@ -128,6 +128,7 @@ const Dashboard: React.FC = () => {
 
   // Tab filter state for recent entries
   const [recentFilter, setRecentFilter] = useState<'all' | 'today' | 'yesterday' | 'week'>('all');
+  const [retryingBillId, setRetryingBillId] = useState<string | null>(null);
 
   const handlePrintBill = async (entry: any) => {
     try {
@@ -263,6 +264,21 @@ const Dashboard: React.FC = () => {
       showToast(err.response?.data?.error || 'Failed to initiate Tally sync', 'error');
     } finally {
       setSyncLoading(false);
+    }
+  };
+
+  const handleRetryBill = async (id: string) => {
+    setRetryingBillId(id);
+    try {
+      await axios.post(`/api/entries/${id}/retry`, {}, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      showToast('Bill re-queued for Tally agent sync!', 'success');
+      setRecentEntries(prev => prev.map(e => e._id === id ? { ...e, status: 'pending', syncError: '' } : e));
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to retry bill', 'error');
+    } finally {
+      setRetryingBillId(null);
     }
   };
 
@@ -643,14 +659,36 @@ const Dashboard: React.FC = () => {
                 <div className="flex items-center justify-between sm:justify-end gap-5 border-t border-slate-100 sm:border-0 pt-3 sm:pt-0">
                   {/* Status & Printed Badges */}
                   <div className="flex items-center gap-3">
-                    {/* Sync Status */}
-                    <span className={`inline-flex items-center gap-1.5 text-[8.5px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${
-                      e.status === 'success' ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' :
-                      e.status === 'failed' ? 'text-rose-700 bg-rose-50 border border-rose-100' :
-                      'text-amber-700 bg-amber-50 border border-amber-100 animate-pulse'
-                    }`}>
-                      {e.status || 'pending'}
-                    </span>
+                    {/* Sync Status & Reason */}
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`inline-flex items-center gap-1.5 text-[8.5px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${
+                        e.status === 'success' ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' :
+                        e.status === 'failed' ? 'text-rose-700 bg-rose-50 border border-rose-100' :
+                        'text-amber-700 bg-amber-50 border border-amber-100 animate-pulse'
+                      }`}>
+                        {e.status || 'pending'}
+                      </span>
+                      {e.status === 'failed' && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[9px] font-semibold text-rose-500 max-w-[130px] truncate" title={e.syncError || e.reason}>
+                            {e.syncError || e.reason || 'Sync error'}
+                          </span>
+                          <button
+                            onClick={() => handleRetryBill(e._id)}
+                            disabled={retryingBillId === e._id}
+                            className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md border border-rose-200 transition-all cursor-pointer disabled:opacity-50"
+                            title="Retry sync"
+                          >
+                            <RotateCcw className={`h-2.5 w-2.5 ${retryingBillId === e._id ? 'animate-spin' : ''}`} />
+                          </button>
+                        </div>
+                      )}
+                      {e.status === 'pending' && (
+                        <span className="text-[9px] font-semibold text-amber-600 max-w-[130px] truncate" title={e.reason || 'Queued for agent'}>
+                          {e.reason || 'Queued for agent'}
+                        </span>
+                      )}
+                    </div>
 
                     {/* Printed Status */}
                     <span className={`inline-flex items-center gap-1 text-[8.5px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg ${

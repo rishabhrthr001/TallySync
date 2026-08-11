@@ -1,21 +1,24 @@
 import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { 
-  Search, Download, ExternalLink, RefreshCcw, CheckCircle2, Clock, XCircle, ChevronRight, TrendingUp, TrendingDown, Printer, Filter, X
+  Search, Download, ExternalLink, RefreshCcw, CheckCircle2, Clock, XCircle, ChevronRight, TrendingUp, TrendingDown, Printer, Filter, X, RotateCcw
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { motion, AnimatePresence } from 'motion/react';
 import PrintableInvoice from '../components/PrintableInvoice';
 import { useReactToPrint } from 'react-to-print';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { formatCurrency } from '../utils/format';
 import { useSearchParams } from 'react-router-dom';
 
 const Entries: React.FC = () => {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [searchParams] = useSearchParams();
   const [entries, setEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
 
   useEffect(() => {
@@ -98,7 +101,6 @@ const Entries: React.FC = () => {
   };
 
   const fetchEntries = async () => {
-    setLoading(true);
     try {
       const res = await axios.get('/api/entries', {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
@@ -108,6 +110,21 @@ const Entries: React.FC = () => {
       console.error('Error fetching entries', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRetryEntry = async (id: string) => {
+    setRetryingId(id);
+    try {
+      await axios.post(`/api/entries/${id}/retry`, {}, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      showToast('Entry re-queued for Tally agent sync!', 'success');
+      setEntries(prev => prev.map(e => e._id === id ? { ...e, status: 'pending', syncError: '' } : e));
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to re-queue entry', 'error');
+    } finally {
+      setRetryingId(null);
     }
   };
 
@@ -227,7 +244,7 @@ const Entries: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-8 py-5">
-                      <div className="flex flex-col items-center justify-center gap-1">
+                      <div className="flex flex-col items-center justify-center gap-1.5">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
                           e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
                           e.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-100' : 
@@ -238,10 +255,32 @@ const Entries: React.FC = () => {
                            <Clock className="h-3.5 w-3.5 stroke-[2.2]" />}
                           {e.status || 'pending'}
                         </span>
-                        {e.status === 'failed' && e.syncError && (
-                          <span className="text-[9px] font-bold text-rose-400 max-w-[150px] leading-tight break-words text-center">
-                            {e.syncError}
-                          </span>
+
+                        {/* Failure reason & Retry */}
+                        {e.status === 'failed' && (
+                          <div className="flex flex-col items-center gap-1 mt-0.5">
+                            <span className="text-[10px] font-semibold text-rose-600 bg-rose-50/80 px-2 py-0.5 rounded-md border border-rose-200/60 max-w-[180px] leading-tight break-words text-center" title={e.syncError || e.reason}>
+                              {e.syncError || e.reason || 'Tally sync failed'}
+                            </span>
+                            <button
+                              onClick={() => handleRetryEntry(e._id)}
+                              disabled={retryingId === e._id}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                              title="Re-queue entry for Tally sync"
+                            >
+                              <RotateCcw className={`h-2.5 w-2.5 ${retryingId === e._id ? 'animate-spin' : ''}`} />
+                              {retryingId === e._id ? 'Retrying...' : 'Retry'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Pending reason */}
+                        {e.status === 'pending' && (
+                          <div className="flex flex-col items-center gap-1 mt-0.5">
+                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-50/80 px-2 py-0.5 rounded-md border border-amber-200/60 max-w-[180px] leading-tight break-words text-center">
+                              {e.reason || 'Queued for Tally agent'}
+                            </span>
+                          </div>
                         )}
                       </div>
                     </td>
@@ -313,9 +352,25 @@ const Entries: React.FC = () => {
                   </div>
                 </div>
 
-                {e.status === 'failed' && e.syncError && (
-                  <div className="p-3 bg-rose-50 border border-rose-100 text-rose-600 rounded-xl text-xs font-semibold leading-relaxed">
-                    <strong>Sync Error:</strong> {e.syncError}
+                {e.status === 'failed' && (
+                  <div className="p-3 bg-rose-50 border border-rose-100 text-rose-700 rounded-xl text-xs space-y-2">
+                    <div className="font-semibold leading-relaxed">
+                      <strong>Failure Reason:</strong> {e.syncError || e.reason || 'Tally rejected entry'}
+                    </div>
+                    <button
+                      onClick={() => handleRetryEntry(e._id)}
+                      disabled={retryingId === e._id}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCcw className={`h-3 w-3 ${retryingId === e._id ? 'animate-spin' : ''}`} />
+                      {retryingId === e._id ? 'Retrying...' : 'Retry Sync'}
+                    </button>
+                  </div>
+                )}
+
+                {e.status === 'pending' && (
+                  <div className="p-2.5 bg-amber-50 border border-amber-100 text-amber-800 rounded-xl text-xs font-semibold">
+                    <strong>Status:</strong> {e.reason || 'Queued for Tally agent'}
                   </div>
                 )}
 

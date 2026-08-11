@@ -386,9 +386,24 @@ router.patch('/:id/sync-status', authenticateToken, async (req: any, res) => {
 });
 
 // Retry logic
-router.post('/:id/retry', authenticateToken, isAdmin, async (req, res) => {
-  await Entry.findByIdAndUpdate(req.params.id, { status: 'pending' });
-  res.json({ message: 'Entry queued for retry' });
+router.post('/:id/retry', authenticateToken, async (req: any, res) => {
+  try {
+    let query: any = { _id: req.params.id };
+    if (req.user.role !== 'admin') {
+      query.companyName = req.user.companyName;
+    }
+    const entry = await Entry.findOneAndUpdate(
+      query,
+      { $set: { status: 'pending', syncError: '' } },
+      { new: true }
+    );
+    if (!entry) {
+      return res.status(404).json({ error: 'Entry not found' });
+    }
+    res.json({ message: 'Entry re-queued for Tally sync', entry });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Dashboard stats endpoint
