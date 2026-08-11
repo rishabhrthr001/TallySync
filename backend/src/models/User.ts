@@ -11,6 +11,8 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   address: { type: String, default: '' },
   plainPassword: { type: String, default: '' },
+  resetToken: { type: String, default: null },
+  resetTokenExpiry: { type: Date, default: null },
   subscription: {
     plan: { type: String, enum: ['free', 'trial', 'pro'], default: 'free' },
     trialStartDate: { type: Date, default: null },

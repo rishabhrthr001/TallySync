@@ -12,6 +12,7 @@ import Entries from './pages/Entries';
 import Inventory from './pages/Inventory';
 import Ledgers from './pages/Ledgers';
 import { ToastProvider } from './contexts/ToastContext';
+import ResetPassword from './pages/ResetPassword';
 
 function PrivateRoute({ children, adminOnly = false }: { children: React.ReactNode, adminOnly?: boolean }) {
   const { user, loading } = useAuth();
@@ -55,6 +56,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             
             <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
             <Route path="/create-entry" element={<ClientOnlyRoute><CreateEntry /></ClientOnlyRoute>} />
