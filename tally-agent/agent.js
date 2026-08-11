@@ -202,7 +202,7 @@ async function getLedgerList(companyName) {
     <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
     <SVCURRENTCOMPANY>${escapeXML(resolvedName)}</SVCURRENTCOMPANY>
 </STATICVARIABLES>
-<TDL><TDLMESSAGE><COLLECTION NAME="TallySyncLedgers"><TYPE>Ledger</TYPE><FETCH>NAME, PARENT, PARTYGSTIN, CLOSINGBALANCE</FETCH></COLLECTION></TDLMESSAGE></TDL>
+<TDL><TDLMESSAGE><COLLECTION NAME="TallySyncLedgers"><TYPE>Ledger</TYPE><FETCH>NAME, PARENT, PARTYGSTIN, OPENINGBALANCE, CLOSINGBALANCE, DEBITTOTALS, CREDITTOTALS, TOTALDEBITS, TOTALCREDITS</FETCH></COLLECTION></TDLMESSAGE></TDL>
 </DESC></BODY></ENVELOPE>`;
     try {
         const data = await tallyRequest(xml);
@@ -1170,8 +1170,6 @@ function parseLedgersFromXml(xml) {
     const blocks = xml.split(/<LEDGER\b/gi);
     for (let i = 1; i < blocks.length; i++) {
         const block = blocks[i];
-        // Try NAME attribute first (e.g. NAME="Party"), then strict <NAME> child element
-        // Do NOT use /<NAME[^>]*>/ — it also matches <NAME.LIST> which wraps names in some Tally versions
         const nameAttrMatch = block.match(/^\s*NAME="([^"]+)"/i);
         const nameTagMatch  = block.match(/<NAME>([\s\S]*?)<\/NAME>/i);
         const rawName = nameAttrMatch ? nameAttrMatch[1] : (nameTagMatch ? nameTagMatch[1] : null);
@@ -1184,18 +1182,60 @@ function parseLedgersFromXml(xml) {
         const gstinMatch = block.match(/<PARTYGSTIN[^>]*>([\s\S]*?)<\/PARTYGSTIN>/i);
         const gstin = gstinMatch ? unescapeXML(gstinMatch[1].trim()) : '';
 
-        // parse closing balance and flip the sign: Debit is negative in Tally XML, but positive (receivable) in DB
+        // Opening Balance (Tally Dr is -, Cr is +)
+        const openMatch = block.match(/<OPENINGBALANCE[^>]*>([\s\S]*?)<\/OPENINGBALANCE>/i);
+        let openingBalance = 0;
+        if (openMatch) {
+            const rawOpen = unescapeXML(openMatch[1].trim());
+            const num = parseFloat(rawOpen.replace(/[^\d.-]/g, ''));
+            if (!isNaN(num)) {
+                openingBalance = -num; // Flip sign: Tally Dr (-) -> DB Dr (+); Tally Cr (+) -> DB Cr (-)
+            }
+        }
+
+        // Closing Balance (Tally Dr is -, Cr is +)
         const balMatch = block.match(/<CLOSINGBALANCE[^>]*>([\s\S]*?)<\/CLOSINGBALANCE>/i);
-        let balance = 0;
+        let closingBalance = 0;
         if (balMatch) {
             const rawBal = unescapeXML(balMatch[1].trim());
             const num = parseFloat(rawBal.replace(/[^\d.-]/g, ''));
             if (!isNaN(num)) {
-                balance = -num; // Flip sign: Tally Dr (-) -> DB Dr (+); Tally Cr (+) -> DB Cr (-)
+                closingBalance = -num; // Flip sign: Tally Dr (-) -> DB Dr (+); Tally Cr (+) -> DB Cr (-)
             }
         }
 
-        ledgers.push({ partyName, parent, gstin, balance });
+        // Debit Total (total debited amount in ledger)
+        const drMatch = block.match(/<(?:DEBITTOTALS|TOTALDEBITS)[^>]*>([\s\S]*?)<\/(?:DEBITTOTALS|TOTALDEBITS)>/i);
+        let debitTotal = 0;
+        if (drMatch) {
+            const rawDr = unescapeXML(drMatch[1].trim());
+            const num = parseFloat(rawDr.replace(/[^\d.-]/g, ''));
+            if (!isNaN(num)) {
+                debitTotal = Math.abs(num);
+            }
+        }
+
+        // Credit Total (total credited amount in ledger)
+        const crMatch = block.match(/<(?:CREDITTOTALS|TOTALCREDITS)[^>]*>([\s\S]*?)<\/(?:CREDITTOTALS|TOTALCREDITS)>/i);
+        let creditTotal = 0;
+        if (crMatch) {
+            const rawCr = unescapeXML(crMatch[1].trim());
+            const num = parseFloat(rawCr.replace(/[^\d.-]/g, ''));
+            if (!isNaN(num)) {
+                creditTotal = Math.abs(num);
+            }
+        }
+
+        ledgers.push({ 
+            partyName, 
+            parent, 
+            gstin, 
+            balance: closingBalance,
+            openingBalance, 
+            closingBalance, 
+            debitTotal, 
+            creditTotal 
+        });
     }
     return ledgers;
 }
@@ -1445,10 +1485,31 @@ async function checkPendingLedgerSyncs() {
                 );
                 console.log(`[SYNC-LEDG]   • Found ${parties.length} party ledgers (Sundry Debtors/Creditors/Cash) out of ${ledgers.length} total.`);
                 
+                let totalOpening = 0;
+                let totalClosing = 0;
+                let totalDebit = 0;
+                let totalCredit = 0;
+
+                for (const l of parties) {
+                    totalOpening += l.openingBalance || 0;
+                    totalClosing += l.closingBalance || 0;
+                    totalDebit += l.debitTotal || 0;
+                    totalCredit += l.creditTotal || 0;
+                }
+
+                const summary = {
+                    openingBalance: totalOpening,
+                    closingBalance: totalClosing,
+                    totalDebit,
+                    totalCredit
+                };
+
+                console.log(`[SYNC-LEDG]   • Financial Totals -> Opening: ${totalOpening.toFixed(2)}, Closing: ${totalClosing.toFixed(2)}, Dr: ${totalDebit.toFixed(2)}, Cr: ${totalCredit.toFixed(2)}`);
                 console.log(`[SYNC-LEDG] Sending ledger data to website...`);
                 const completeRes = await axios.post(`${CONFIG.BACKEND_URL}/api/ledger/sync-complete`, {
                     companyName,
-                    ledgers: parties
+                    ledgers: parties,
+                    summary
                 }, {
                     headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
                 });

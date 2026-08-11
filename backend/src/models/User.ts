@@ -28,6 +28,13 @@ const userSchema = new mongoose.Schema({
   ledgerSyncStatus: { type: String, enum: ['idle', 'pending', 'syncing', 'success', 'failed'], default: 'idle' },
   ledgerSyncError: { type: String, default: '' },
   lastLedgerSync: { type: Date, default: null },
+  tallySummary: {
+    openingBalance: { type: Number, default: 0 },
+    closingBalance: { type: Number, default: 0 },
+    totalDebit: { type: Number, default: 0 },
+    totalCredit: { type: Number, default: 0 },
+    lastSyncedAt: { type: Date, default: null }
+  },
   createdAt: { type: Date, default: Date.now }
 });
 

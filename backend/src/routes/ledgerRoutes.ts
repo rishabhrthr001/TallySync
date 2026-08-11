@@ -80,7 +80,7 @@ router.post('/sync-complete', authenticateToken, async (req: any, res) => {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
-    const { companyName, ledgers } = req.body;
+    const { companyName, ledgers, summary } = req.body;
     if (!companyName) {
       return res.status(400).json({ error: 'companyName is required' });
     }
@@ -94,8 +94,10 @@ router.post('/sync-complete', authenticateToken, async (req: any, res) => {
 
     // Upsert ledgers in the database
     for (const ledgerData of ledgers) {
-      const { partyName, gstin, balance } = ledgerData;
+      const { partyName, gstin, balance, openingBalance, closingBalance, debitTotal, creditTotal } = ledgerData;
       if (!partyName) continue;
+
+      const finalClosing = closingBalance !== undefined ? Number(closingBalance) : (balance !== undefined ? Number(balance) : 0);
 
       await Ledger.findOneAndUpdate(
         { companyName, partyName: partyName.trim() },
@@ -105,7 +107,11 @@ router.post('/sync-complete', authenticateToken, async (req: any, res) => {
             companyName,
             partyName: partyName.trim(),
             gstin: gstin ? gstin.trim().toUpperCase() : '',
-            balance: Number(balance) || 0,
+            balance: finalClosing,
+            openingBalance: Number(openingBalance) || 0,
+            closingBalance: finalClosing,
+            debitTotal: Number(debitTotal) || 0,
+            creditTotal: Number(creditTotal) || 0,
             updatedAt: new Date()
           }
         },
@@ -113,17 +119,44 @@ router.post('/sync-complete', authenticateToken, async (req: any, res) => {
       );
     }
 
-    // Mark sync status as success
+    // Prepare summary if provided, or aggregate from ledgers
+    let summaryData = summary;
+    if (!summaryData) {
+      let openSum = 0, closeSum = 0, drSum = 0, crSum = 0;
+      ledgers.forEach(l => {
+        openSum += Number(l.openingBalance) || 0;
+        closeSum += Number(l.closingBalance) || Number(l.balance) || 0;
+        drSum += Number(l.debitTotal) || 0;
+        crSum += Number(l.creditTotal) || 0;
+      });
+      summaryData = {
+        openingBalance: openSum,
+        closingBalance: closeSum,
+        totalDebit: drSum,
+        totalCredit: crSum
+      };
+    }
+
+    // Mark sync status as success and store tallySummary
     await User.findOneAndUpdate(
       { companyName },
       {
-        ledgerSyncStatus: 'success',
-        ledgerSyncError: '',
-        lastLedgerSync: new Date()
+        $set: {
+          ledgerSyncStatus: 'success',
+          ledgerSyncError: '',
+          lastLedgerSync: new Date(),
+          tallySummary: {
+            openingBalance: Number(summaryData.openingBalance) || 0,
+            closingBalance: Number(summaryData.closingBalance) || 0,
+            totalDebit: Number(summaryData.totalDebit) || 0,
+            totalCredit: Number(summaryData.totalCredit) || 0,
+            lastSyncedAt: new Date()
+          }
+        }
       }
     );
 
-    res.json({ success: true, message: `Successfully synchronized ${ledgers.length} ledgers.` });
+    res.json({ success: true, message: `Successfully synchronized ${ledgers.length} ledgers with balances.`, summary: summaryData });
   } catch (error: any) {
     console.error('Ledger sync-complete error:', error);
     res.status(500).json({ error: error.message });

@@ -425,6 +425,99 @@ const Dashboard: React.FC = () => {
         />
       </div>
 
+      {/* Tally Live Sync Overview Cards */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+            <h3 className="text-sm font-black uppercase tracking-wider text-slate-750">Tally Balances &amp; Movements</h3>
+          </div>
+          {stats?.tallySummary?.lastSyncedAt && (
+            <span className="text-[11px] font-bold text-slate-400">
+              Last synced from Tally: {new Date(stats.tallySummary.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/70 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.02)] flex flex-col justify-between group hover:border-indigo-300 hover:shadow-lg transition-all duration-300">
+            <div className="flex items-start justify-between">
+              <div className="p-3.5 rounded-2xl bg-indigo-50 text-indigo-600 group-hover:scale-105 transition-transform duration-300">
+                <CreditCard className="h-5.5 w-5.5 stroke-[2.2]" />
+              </div>
+              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                (stats?.tallySummary?.openingBalance || 0) >= 0 ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
+              }`}>
+                {(stats?.tallySummary?.openingBalance || 0) >= 0 ? 'Dr (Receivable)' : 'Cr (Payable)'}
+              </span>
+            </div>
+            <div className="mt-5">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Opening Balance</p>
+              <h4 className="text-2xl font-black text-slate-900 font-mono tracking-tight mt-2">
+                {formatCurrency(Math.abs(stats?.tallySummary?.openingBalance || 0))}
+              </h4>
+              <p className="text-[10px] text-slate-400 font-semibold mt-1">Starting balance in Tally</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/70 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.02)] flex flex-col justify-between group hover:border-emerald-300 hover:shadow-lg transition-all duration-300">
+            <div className="flex items-start justify-between">
+              <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-600 group-hover:scale-105 transition-transform duration-300">
+                <TrendingUp className="h-5.5 w-5.5 stroke-[2.2]" />
+              </div>
+              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                (stats?.tallySummary?.closingBalance || 0) >= 0 ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
+              }`}>
+                {(stats?.tallySummary?.closingBalance || 0) >= 0 ? 'Dr (Receivable)' : 'Cr (Payable)'}
+              </span>
+            </div>
+            <div className="mt-5">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Closing Balance</p>
+              <h4 className="text-2xl font-black text-slate-900 font-mono tracking-tight mt-2">
+                {formatCurrency(Math.abs(stats?.tallySummary?.closingBalance || 0))}
+              </h4>
+              <p className="text-[10px] text-slate-400 font-semibold mt-1">Net closing balance in Tally</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/70 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.02)] flex flex-col justify-between group hover:border-blue-300 hover:shadow-lg transition-all duration-300">
+            <div className="flex items-start justify-between">
+              <div className="p-3.5 rounded-2xl bg-blue-50 text-blue-600 group-hover:scale-105 transition-transform duration-300">
+                <ArrowUpRight className="h-5.5 w-5.5 stroke-[2.2]" />
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md text-blue-600 bg-blue-50">
+                Debit (Dr)
+              </span>
+            </div>
+            <div className="mt-5">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Dr Total</p>
+              <h4 className="text-2xl font-black text-slate-900 font-mono tracking-tight mt-2">
+                {formatCurrency(stats?.tallySummary?.totalDebit || 0)}
+              </h4>
+              <p className="text-[10px] text-slate-400 font-semibold mt-1">Total debited movements from Tally</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/70 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.02)] flex flex-col justify-between group hover:border-amber-300 hover:shadow-lg transition-all duration-300">
+            <div className="flex items-start justify-between">
+              <div className="p-3.5 rounded-2xl bg-amber-50 text-amber-600 group-hover:scale-105 transition-transform duration-300">
+                <ArrowDownRight className="h-5.5 w-5.5 stroke-[2.2]" />
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md text-amber-600 bg-amber-50">
+                Credit (Cr)
+              </span>
+            </div>
+            <div className="mt-5">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Cr Total</p>
+              <h4 className="text-2xl font-black text-slate-900 font-mono tracking-tight mt-2">
+                {formatCurrency(stats?.tallySummary?.totalCredit || 0)}
+              </h4>
+              <p className="text-[10px] text-slate-400 font-semibold mt-1">Total credited movements from Tally</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Analytics Chart */}
       <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200/60 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.03)]">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-8">

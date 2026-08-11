@@ -2,6 +2,7 @@ import express from 'express';
 import Entry from '../models/Entry.js';
 import Item from '../models/Item.js';
 import Ledger from '../models/Ledger.js';
+import User from '../models/User.js';
 import { authenticateToken, isAdmin } from '../middleware/auth.js';
 import { checkDailyBillLimit, checkProFeatureAccess } from '../middleware/subscriptionMiddleware.js';
 import multer from 'multer';
@@ -420,7 +421,36 @@ router.get('/dashboard-stats', authenticateToken, async (req: any, res) => {
       if (e.status === 'failed') stats.failedCount++;
     });
 
-    res.json(stats);
+    // Aggregate Tally metrics from ledgers and user summary
+    const [ledgers, user] = await Promise.all([
+      Ledger.find({ companyName: req.user.companyName }),
+      User.findOne({ companyName: req.user.companyName })
+    ]);
+
+    let ledgerOpeningSum = 0;
+    let ledgerClosingSum = 0;
+    let ledgerDebitSum = 0;
+    let ledgerCreditSum = 0;
+
+    ledgers.forEach(l => {
+      ledgerOpeningSum += (l.openingBalance || 0);
+      ledgerClosingSum += (l.closingBalance || l.balance || 0);
+      ledgerDebitSum += (l.debitTotal || 0);
+      ledgerCreditSum += (l.creditTotal || 0);
+    });
+
+    const tallySummary = {
+      openingBalance: user?.tallySummary?.openingBalance || ledgerOpeningSum,
+      closingBalance: user?.tallySummary?.closingBalance || ledgerClosingSum,
+      totalDebit: user?.tallySummary?.totalDebit || ledgerDebitSum,
+      totalCredit: user?.tallySummary?.totalCredit || ledgerCreditSum,
+      lastSyncedAt: user?.tallySummary?.lastSyncedAt || user?.lastLedgerSync || null
+    };
+
+    res.json({
+      ...stats,
+      tallySummary
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
