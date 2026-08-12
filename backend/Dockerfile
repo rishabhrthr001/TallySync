@@ -2,13 +2,15 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Install dependencies needed for node modules and OCR image-to-PDF conversions (ImageMagick/Ghostscript)
+# Install dependencies needed for node modules, OCR, and password-protected PDF decryption (qpdf/poppler-utils/Ghostscript)
 RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
     imagemagick \
     ghostscript \
+    qpdf \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Relax ImageMagick security policy for PDF conversion

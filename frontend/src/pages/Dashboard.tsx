@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { 
   TrendingUp, TrendingDown, DollarSign, Package, CreditCard, Plus, ArrowUpRight, ArrowDownRight, Sparkles, RefreshCcw,
-  Printer, CheckCircle2, Clock, XCircle, Trash2, Check, RotateCcw
+  Printer, CheckCircle2, Clock, XCircle, Trash2, Check, RotateCcw, Eye, EyeOff
 } from 'lucide-react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
@@ -40,6 +40,7 @@ const Dashboard: React.FC = () => {
   const [tempTransactions, setTempTransactions] = useState<any[]>([]);
   const [syncSaving, setSyncSaving] = useState(false);
   const [bankPassword, setBankPassword] = useState<string>('');
+  const [showBankPassword, setShowBankPassword] = useState<boolean>(false);
   const [showProModal, setShowProModal] = useState(false);
 
   const updateTempTxn = (index: number, field: string, value: any) => {
@@ -826,15 +827,25 @@ const Dashboard: React.FC = () => {
 
                   {bankFile && (
                     <div className="space-y-1 mt-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">PDF Password (Optional)</label>
-                      <input 
-                        type="password"
-                        placeholder="Enter statement password if encrypted"
-                        value={bankPassword}
-                        onChange={(e) => setBankPassword(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-850 outline-none focus:border-indigo-400 focus:bg-white transition-all"
-                        disabled={parsingBank}
-                      />
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">PDF Password (If Encrypted)</label>
+                      <div className="relative flex items-center">
+                        <input 
+                          type={showBankPassword ? "text" : "password"}
+                          placeholder="Enter statement password (e.g. DOB, PAN, Account No)"
+                          value={bankPassword}
+                          onChange={(e) => setBankPassword(e.target.value)}
+                          className="w-full pl-3.5 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-850 outline-none focus:border-indigo-400 focus:bg-white transition-all"
+                          disabled={parsingBank}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowBankPassword(!showBankPassword)}
+                          className="absolute right-3 text-slate-400 hover:text-slate-600 transition-colors p-1"
+                          title={showBankPassword ? "Hide password" : "Show password"}
+                        >
+                          {showBankPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
                     </div>
                   )}
                   

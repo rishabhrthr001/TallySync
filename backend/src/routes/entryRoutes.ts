@@ -85,7 +85,8 @@ async function parseAndExtractInvoice(
   originalname: string, 
   mimetype: string, 
   docType: 'sales' | 'purchase' = 'purchase',
-  companyName?: string
+  companyName?: string,
+  password?: string
 ) {
   let finalMime = mimetype;
   if (!finalMime) {
@@ -95,7 +96,14 @@ async function parseAndExtractInvoice(
     else finalMime = 'application/octet-stream';
   }
 
-  const data = await extractInvoiceDetails(buffer, finalMime, docType);
+  let fileBuffer = buffer;
+  const cleanPassword = (password || '').trim();
+  if (cleanPassword && (finalMime === 'application/pdf' || /\.pdf$/i.test(originalname))) {
+    fileBuffer = await decryptPdf(fileBuffer, cleanPassword);
+    finalMime = 'application/pdf';
+  }
+
+  const data = await extractInvoiceDetails(fileBuffer, finalMime, docType);
   
   // Fetch existing inventory for fuzzy matching
   let inventoryList: any[] = [];
@@ -211,7 +219,8 @@ router.post('/upload-pdf', authenticateToken, checkProFeatureAccess, upload.sing
       return res.status(400).json({ error: 'No file uploaded' });
     }
     const docType: 'sales' | 'purchase' = req.body.docType === 'sales' ? 'sales' : 'purchase';
-    const { extractedEntry } = await parseAndExtractInvoice(req.file.buffer, req.file.originalname, req.file.mimetype, docType, req.user.companyName);
+    const password = req.body.password;
+    const { extractedEntry } = await parseAndExtractInvoice(req.file.buffer, req.file.originalname, req.file.mimetype, docType, req.user.companyName, password);
     res.json({ success: true, data: extractedEntry }); 
   } catch (error: any) {
     console.error('PDF parsing error DETAIL:', error);
@@ -227,7 +236,8 @@ router.post('/upload-document', authenticateToken, upload.any(), async (req: any
       return res.status(400).json({ error: 'No file uploaded' });
     }
     const docType: 'sales' | 'purchase' = req.body.docType === 'sales' ? 'sales' : 'purchase';
-    const { extractedEntry } = await parseAndExtractInvoice(file.buffer, file.originalname, file.mimetype, docType, req.user.companyName);
+    const password = req.body.password;
+    const { extractedEntry } = await parseAndExtractInvoice(file.buffer, file.originalname, file.mimetype, docType, req.user.companyName, password);
     res.json({ success: true, data: extractedEntry }); 
   } catch (error: any) {
     console.error('Document parsing error DETAIL:', error);
@@ -494,27 +504,86 @@ router.patch('/:id/print-status', authenticateToken, async (req: any, res) => {
   }
 });
 
-// Helper to decrypt PDF using Ghostscript (gs)
+// Robust multi-strategy helper to decrypt password-protected PDFs (qpdf / pdftocairo / Ghostscript)
 async function decryptPdf(buffer: Buffer, password?: string): Promise<Buffer> {
-  if (!password) {
+  const cleanPassword = (password || '').trim();
+  if (!cleanPassword) {
     return buffer;
   }
   
   const tempDir = os.tmpdir();
-  const timestamp = Date.now() + Math.random().toString(36).substr(2, 5);
-  const inputPath = path.join(tempDir, `input_${timestamp}.pdf`);
-  const outputPath = path.join(tempDir, `output_${timestamp}.pdf`);
+  const timestamp = Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+  const inputPath = path.join(tempDir, `enc_in_${timestamp}.pdf`);
+  const outputPath = path.join(tempDir, `dec_out_${timestamp}.pdf`);
   
   try {
     await fs.promises.writeFile(inputPath, buffer);
-    // Execute Ghostscript to decrypt the PDF
-    const cmd = `gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile="${outputPath}" -sPDFPassword="${password.replace(/"/g, '\\"')}" "${inputPath}"`;
-    await execPromise(cmd);
+    const escapedPassword = cleanPassword.replace(/"/g, '\\"');
     
+    let decrypted = false;
+
+    // Strategy 1: qpdf (Gold standard: supports RC4, AES-128, AES-256 encrypted bank PDFs)
+    try {
+      const qpdfCmd = `qpdf --password="${escapedPassword}" --decrypt "${inputPath}" "${outputPath}"`;
+      try {
+        await execPromise(qpdfCmd);
+      } catch (qpdfErr: any) {
+        // Exit code 3 in qpdf means minor PDF syntax warnings, but file is decrypted successfully
+        if (qpdfErr.code !== 3) {
+          throw qpdfErr;
+        }
+      }
+      if (fs.existsSync(outputPath)) {
+        const stat = await fs.promises.stat(outputPath);
+        if (stat.size > 100) {
+          decrypted = true;
+        }
+      }
+    } catch (e: any) {
+      console.warn('[PDF Decrypt] qpdf attempt failed, trying fallback...', e.message);
+    }
+
+    // Strategy 2: pdftocairo (Poppler)
+    if (!decrypted) {
+      try {
+        const popplerCmd = `pdftocairo -pdf -upw "${escapedPassword}" "${inputPath}" "${outputPath}"`;
+        await execPromise(popplerCmd);
+        if (fs.existsSync(outputPath)) {
+          const stat = await fs.promises.stat(outputPath);
+          if (stat.size > 100) {
+            decrypted = true;
+          }
+        }
+      } catch (e: any) {
+        console.warn('[PDF Decrypt] pdftocairo attempt failed, trying Ghostscript...', e.message);
+      }
+    }
+
+    // Strategy 3: Ghostscript (gs)
+    if (!decrypted) {
+      try {
+        const gsCmd = `gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile="${outputPath}" -sPDFPassword="${escapedPassword}" "${inputPath}"`;
+        await execPromise(gsCmd);
+        if (fs.existsSync(outputPath)) {
+          const stat = await fs.promises.stat(outputPath);
+          if (stat.size > 100) {
+            decrypted = true;
+          }
+        }
+      } catch (e: any) {
+        console.warn('[PDF Decrypt] Ghostscript attempt failed...', e.message);
+      }
+    }
+
+    if (!decrypted || !fs.existsSync(outputPath)) {
+      throw new Error('Invalid PDF password or decryption failed. Please verify the password.');
+    }
+
     const decryptedBuffer = await fs.promises.readFile(outputPath);
+    console.log(`[PDF Decrypt] Successfully decrypted PDF with password (${decryptedBuffer.length} bytes)`);
     return decryptedBuffer;
   } catch (error: any) {
-    console.error('PDF decryption failed:', error);
+    console.error('PDF decryption error:', error.message || error);
     throw new Error('Invalid PDF password or decryption failed. Please verify the password.');
   } finally {
     // Cleanup temporary files
@@ -536,14 +605,15 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
       else finalMime = 'application/octet-stream';
     }
 
-    const password = req.body.password;
+    const password = req.body.password ? req.body.password.trim() : '';
     let fileBuffer = req.file.buffer;
 
-    if (password && finalMime === 'application/pdf') {
+    if (password && (finalMime === 'application/pdf' || /\.pdf$/i.test(req.file.originalname))) {
       try {
         fileBuffer = await decryptPdf(fileBuffer, password);
-      } catch (decruptErr: any) {
-        return res.status(400).json({ error: decruptErr.message });
+        finalMime = 'application/pdf';
+      } catch (decryptErr: any) {
+        return res.status(400).json({ error: decryptErr.message });
       }
     }
 
