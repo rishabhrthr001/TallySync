@@ -374,91 +374,74 @@ export interface ExtractedInvoiceInfo {
 }
 
 /**
- * Extracts structured invoice details from a PDF or image file buffer using Gemini 1.5 Pro.
+ * Extracts structured invoice details from a PDF or image file buffer using Gemini Flash.
  */
 export async function extractInvoiceDetails(buffer: Buffer, mimeType: string, docType: 'sales' | 'purchase' = 'purchase'): Promise<ExtractedInvoiceInfo> {
+  const isPurchase = docType === 'purchase';
+
+  const prompt = `You are a high-speed accounting parser. Extract invoice details from this ${docType.toUpperCase()} document and return strictly valid JSON matching this schema:
+{
+  "partyName": "${isPurchase ? 'Supplier / Vendor Name' : 'Buyer / Customer Name'}",
+  "partyGstin": "GSTIN if present",
+  "invoiceNumber": "Invoice/Bill Number",
+  "date": "YYYY-MM-DD",
+  "items": [
+    {
+      "name": "Clean item name without serial prefix or batch lines",
+      "hsn": "HSN code",
+      "quantity": 1,
+      "unit": "BAGS/PCS/KG/NOS",
+      "rate": 100,
+      "amount": 100,
+      "gst": 18
+    }
+  ],
+  "taxableAmount": 0,
+  "taxAmount": 0,
+  "totalAmount": 0,
+  "gstType": "cgst-sgst" or "igst",
+  "notes": "Optional notes"
+}
+
+Important Rules:
+- If MT (Metric Ton) is listed but Bags (e.g. "(2140 Bags)") is in description, extract quantity as 2140 and unit as BAGS.
+- Strip leading numbering like "1-", "2.", batch metadata like "Batch: Primary Batch".
+- Format date as YYYY-MM-DD.
+- Return ONLY valid JSON.`;
+
+  const docPart = {
+    inlineData: {
+      data: buffer.toString('base64'),
+      mimeType: mimeType || 'application/pdf'
+    }
+  };
+
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
-
-    const docPart = {
-      inlineData: {
-        data: buffer.toString('base64'),
-        mimeType: mimeType
-      }
-    };
-
-    const isPurchase = docType === 'purchase';
-
-    const prompt = `You are an expert accounting document parser extracting structured JSON data from an invoice PDF/image.
-
-DOCUMENT TYPE FOR PARSING: "${docType.toUpperCase()} BILL"
-
-PARTY EXTRACTION INSTRUCTIONS:
-- This document is being processed as a ${docType.toUpperCase()} BILL.
-${isPurchase ? `- Because this is a PURCHASE BILL:
-  * The "partyName" MUST BE THE SUPPLIER / VENDOR / SELLER / ISSUER (found under sections like "Supplier", "Vendor", "From", "Billed From", "Messrs").
-  * Example: If Supplier is "JJMBSS 2025-26" and Buyer is "BHARAT ENTERPRISES", partyName MUST BE "JJMBSS 2025-26".
-  * The "partyGstin" MUST BE THE SUPPLIER'S / VENDOR'S GSTIN. DO NOT extract the buyer's GSTIN.` : `- Because this is a SALES BILL:
-  * The "partyName" MUST BE THE BUYER / CUSTOMER / CONSIGNEE (found under sections like "Buyer", "Billed To", "Customer", "Ship To", "Consignee").
-  * The "partyGstin" MUST BE THE BUYER'S / CUSTOMER'S GSTIN. DO NOT extract our seller GSTIN.`}
-
-ITEM EXTRACTION INSTRUCTIONS:
-- For each item line in the table:
-  * Extract a CLEAN, INTELLIGENT item name.
-  * STRIP OUT: leading serial numbers or index prefixes like "1-", "2.", batch metadata lines (e.g. "Batch : Primary Batch", "Batch No", "Exp Date"), serial numbers, and table formatting artifacts.
-  * PRESERVE: product variants, brand, weight/pack size (e.g. "UREA NEEM IFFCO 45 KG" or "DAP IFFCO 50 KG").
-  * CRITICAL FOR METRIC TON (MT) & BAGS QUANTITY PARSING:
-    - Fertilizer / agricultural invoices often show Metric Tons (MT) in the main table quantity column (e.g. "95.13 MT", "95.130", "105.70 MT"), but list the BAG count inside parentheses or in the Item Description column (e.g., "UREA NEEM IFFCO 45 KG (2140 Bags)", "(2140 BAGS)", "2140 Bags").
-    - YOU MUST SEARCH THE ITEM DESCRIPTION AND SURROUNDING TEXT FOR BAG COUNTS (e.g. "(2140 Bags)" or "2140 BAGS").
-    - ALWAYS OVERRIDE the MT decimal quantity (like 95.13) AND EXTRACT THE BAG COUNT (e.g. 2140) as the numerical "quantity" and "BAGS" as the "unit".
-    - Calculate the unit "rate" per bag as (line taxable amount / bag quantity), so that (quantity * rate) EXACTLY matches the total line amount in the PDF.
-  * Extract HSN code, Quantity (in Bags if specified in description), Unit (e.g., BAGS, PCS, KG), Rate per bag, Line Taxable Amount, GST%, CGST, SGST, and IGST if visible.
-
-GENERAL INSTRUCTIONS:
-- Format date as YYYY-MM-DD.
-- Determine gstType ("cgst-sgst" vs "igst"):
-  * Compare the first 2 digits (state code) of the Supplier GSTIN and Buyer GSTIN.
-  * If both GSTINs share the SAME 2-digit state code (e.g. both '08' for Rajasthan or both '27' for Maharashtra), set gstType to 'cgst-sgst'.
-  * If Supplier and Buyer have DIFFERENT 2-digit state codes (e.g. '08' vs '27'), set gstType to 'igst'.
-  * Default to 'cgst-sgst' for intrastate bills.`;
-
     const result = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: prompt },
-            docPart
-          ]
-        }
-      ],
+      contents: [{ role: 'user', parts: [{ text: prompt }, docPart] }],
       generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: invoiceExtractionSchema as any
+        responseMimeType: 'application/json'
       }
     });
 
     const responseText = result.response.text();
     if (!responseText) {
-      throw new Error('Gemini returned empty content.');
+      throw new Error('Empty response from model');
     }
 
-    return JSON.parse(responseText) as ExtractedInvoiceInfo;
+    return parseGeminiJson<ExtractedInvoiceInfo>(responseText);
   } catch (error: any) {
-    console.error('Gemini invoice extraction error:', error);
-    // Fallback to gemini-flash-lite-latest if primary hits any unexpected issue
+    console.warn('Fast flash model failed, trying fallback...', error.message || error);
     try {
-      console.log('Retrying with gemini-flash-lite-latest fallback...');
       const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-flash-lite-latest' });
-      const docPart = { inlineData: { data: buffer.toString('base64'), mimeType } };
-      const fallbackPrompt = `Extract invoice details as JSON. Document type: ${docType}. Extract partyName (${docType === 'purchase' ? 'Supplier/Vendor' : 'Buyer/Customer'}), partyGstin, invoiceNumber, date (YYYY-MM-DD), items (clean name without batch lines), taxableAmount, taxAmount, totalAmount, gstType.`;
       const fallbackResult = await fallbackModel.generateContent({
-        contents: [{ role: 'user', parts: [{ text: fallbackPrompt }, docPart] }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: invoiceExtractionSchema as any }
+        contents: [{ role: 'user', parts: [{ text: prompt }, docPart] }],
+        generationConfig: { responseMimeType: 'application/json' }
       });
-      return JSON.parse(fallbackResult.response.text()) as ExtractedInvoiceInfo;
+      return parseGeminiJson<ExtractedInvoiceInfo>(fallbackResult.response.text());
     } catch (fallbackError: any) {
-      throw new Error(`Gemini invoice extraction failed: ${error.message || error}`);
+      throw new Error(`Invoice parsing failed: ${fallbackError.message || error.message || error}`);
     }
   }
 }
