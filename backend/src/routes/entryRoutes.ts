@@ -622,12 +622,12 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
     try {
       data = await extractBankStatementDetails(fileBuffer, finalMime);
     } catch (parseErr: any) {
-      // Check if it looks like an encryption error
-      const errStr = parseErr.message || '';
-      if (errStr.toLowerCase().includes('encrypted') || errStr.toLowerCase().includes('password') || errStr.toLowerCase().includes('fail')) {
-        return res.status(400).json({ error: 'PDF parsing failed. This file might be password-protected. Please provide a password.' });
+      console.error('[Bank Statement Upload] Extraction error:', parseErr);
+      const errStr = (parseErr.message || '').toLowerCase();
+      if ((errStr.includes('encrypt') || errStr.includes('password')) && !password) {
+        return res.status(400).json({ error: 'This PDF appears to be password-protected. Please enter the PDF password and try again.' });
       }
-      throw parseErr;
+      return res.status(500).json({ error: `Bank statement parsing failed: ${parseErr.message || 'Unable to process document'}` });
     }
     const rawTransactions = data.transactions || [];
     const detectedBank = (data.bankName || 'Bank Account').trim();

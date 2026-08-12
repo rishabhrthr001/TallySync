@@ -639,11 +639,11 @@ Return strictly valid JSON following the schema.`;
 
       const fallbackResult = await fallbackModel.generateContent({
         contents: [{ role: 'user', parts: fallbackParts }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: bankStatementExtractionSchema as any }
+        generationConfig: { responseMimeType: 'application/json' }
       });
       return parseGeminiJson<ExtractedBankStatementInfo>(fallbackResult.response.text());
     } catch (fallbackError: any) {
-      throw new Error(`Gemini bank statement extraction failed: ${error.message || error}`);
+      throw new Error(`Gemini bank statement extraction failed: ${fallbackError.message || error.message || error}`);
     }
   }
 }
