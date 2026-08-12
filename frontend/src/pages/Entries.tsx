@@ -72,32 +72,39 @@ const Entries: React.FC = () => {
   }, []);
 
   const triggerPrint = (entry: any) => {
+    const tot = Number(entry.totalAmount || 0);
+    const taxableVal = Number(entry.taxableAmount || (tot > 0 ? Number((tot / 1.18).toFixed(2)) : 0));
+    const taxVal = Number(entry.taxAmount || (tot > 0 ? Number((tot - taxableVal).toFixed(2)) : 0));
+
     const itemsArr = Array.isArray(entry.items) && entry.items.length > 0
       ? entry.items
-      : [{ name: entry.partyName ? `Voucher - ${entry.partyName}` : 'Bill Item', quantity: 1, rate: entry.totalAmount || 0, amount: entry.totalAmount || 0, gst: 18 }];
-
-    const tot = Number(entry.totalAmount || 0);
-    const tax = Number((tot * 0.18 / 1.18).toFixed(2));
-    const taxVal = Number((tot - tax).toFixed(2));
+      : [{ 
+          name: entry.partyName ? `Supply - ${entry.partyName}` : 'Taxable Item Supply', 
+          quantity: 1, 
+          rate: taxableVal, 
+          amount: taxableVal, 
+          gst: 18,
+          hsn: '9983' 
+        }];
 
     const formatted = {
       type: entry.type || 'sales',
-      partyName: entry.partyName || 'Cash',
+      partyName: entry.partyName || 'Cash Customer',
       partyGstin: entry.partyGstin || '',
+      partyAddress: entry.partyAddress || '',
       invoiceNumber: entry.invoiceNumber || `INV-${Date.now().toString().slice(-4)}`,
       date: entry.date || (entry.createdAt ? new Date(entry.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
       items: itemsArr,
-      taxableAmount: entry.taxableAmount || taxVal,
-      taxAmount: entry.taxAmount || tax,
+      taxableAmount: taxableVal,
+      taxAmount: taxVal,
       totalAmount: tot,
       gstType: entry.gstType || 'cgst-sgst',
       notes: entry.notes || '',
-      companyName: entry.companyName || user?.companyName || 'Company Name'
+      companyName: entry.companyName || user?.companyName || 'PHOTO BILL ENTERPRISES'
     };
 
     setPrintData(formatted);
     setIsPrintModalOpen(true);
-    setShouldPrint(true);
   };
 
   const fetchEntries = async () => {
@@ -490,8 +497,8 @@ const Entries: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Dedicated Standalone Native Print Container - react-to-print renders only this ref */}
-      <div style={{ display: 'none' }}>
+      {/* Dedicated Standalone Native Print Container */}
+      <div className="hidden print:block fixed -top-[9999px] -left-[9999px]">
         {printData && <PrintableInvoice ref={printRef} data={printData} user={user} />}
       </div>
     </Layout>

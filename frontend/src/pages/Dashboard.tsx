@@ -151,6 +151,30 @@ const Dashboard: React.FC = () => {
   const [retryingBillId, setRetryingBillId] = useState<string | null>(null);
 
   const handlePrintBill = async (entry: any) => {
+    const tot = Number(entry.totalAmount || 0);
+    const taxableVal = Number(entry.taxableAmount || (tot > 0 ? Number((tot / 1.18).toFixed(2)) : 0));
+    const taxVal = Number(entry.taxAmount || (tot > 0 ? Number((tot - taxableVal).toFixed(2)) : 0));
+
+    const itemsArr = Array.isArray(entry.items) && entry.items.length > 0
+      ? entry.items
+      : [{ 
+          name: entry.partyName ? `Supply - ${entry.partyName}` : 'Taxable Supply', 
+          quantity: 1, 
+          rate: taxableVal, 
+          amount: taxableVal, 
+          gst: 18,
+          hsn: '9983' 
+        }];
+
+    const formattedInvoice = {
+      ...entry,
+      items: itemsArr,
+      taxableAmount: taxableVal,
+      taxAmount: taxVal,
+      totalAmount: tot,
+      companyName: entry.companyName || user?.companyName || 'PHOTO BILL ENTERPRISES'
+    };
+
     try {
       // Mark as printed in the DB
       await axios.patch(`/api/entries/${entry._id}/print-status`, {}, {
@@ -159,12 +183,12 @@ const Dashboard: React.FC = () => {
       // Update local state
       setRecentEntries(prev => prev.map(e => e._id === entry._id ? { ...e, printed: true, printedAt: new Date() } : e));
       // Set print data
-      setPrintData({ ...entry, companyName: user?.companyName });
+      setPrintData(formattedInvoice);
       showToast("Invoice marked as printed & sent to printer", "success");
     } catch (err) {
       console.error("Failed to update print status", err);
       // Fallback print
-      setPrintData({ ...entry, companyName: user?.companyName });
+      setPrintData(formattedInvoice);
     }
   };
 

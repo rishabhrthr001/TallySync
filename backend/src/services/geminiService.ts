@@ -1,7 +1,78 @@
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { exec } from 'child_process';
+import util from 'util';
+
+const execPromise = util.promisify(exec);
 
 // Initialize the Google Gen AI client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+/**
+ * Safe JSON parser for Gemini responses that might contain markdown fences or leading/trailing text
+ */
+export function parseGeminiJson<T>(rawText: string): T {
+  let cleaned = (rawText || '').trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  }
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  let startIdx = 0;
+  if (firstBrace !== -1 && firstBracket !== -1) {
+    startIdx = Math.min(firstBrace, firstBracket);
+  } else if (firstBrace !== -1) {
+    startIdx = firstBrace;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+  }
+  
+  const lastBrace = cleaned.lastIndexOf('}');
+  const lastBracket = cleaned.lastIndexOf(']');
+  let endIdx = cleaned.length;
+  if (lastBrace !== -1 && lastBracket !== -1) {
+    endIdx = Math.max(lastBrace, lastBracket) + 1;
+  } else if (lastBrace !== -1) {
+    endIdx = lastBrace + 1;
+  } else if (lastBracket !== -1) {
+    endIdx = lastBracket + 1;
+  }
+
+  if (startIdx > 0 || endIdx < cleaned.length) {
+    cleaned = cleaned.substring(startIdx, endIdx).trim();
+  }
+
+  return JSON.parse(cleaned) as T;
+}
+
+/**
+ * Extracts tabular text directly from a decrypted PDF using poppler's pdftotext
+ */
+async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+  const tempDir = os.tmpdir();
+  const timestamp = Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+  const inputPath = path.join(tempDir, `txt_in_${timestamp}.pdf`);
+  const outputPath = path.join(tempDir, `txt_out_${timestamp}.txt`);
+
+  try {
+    await fs.promises.writeFile(inputPath, buffer);
+    // pdftotext -layout preserves columns and tabular structure for bank statements
+    const cmd = `pdftotext -layout "${inputPath}" "${outputPath}"`;
+    await execPromise(cmd);
+    if (fs.existsSync(outputPath)) {
+      const text = await fs.promises.readFile(outputPath, 'utf-8');
+      return text.trim();
+    }
+  } catch (e: any) {
+    console.warn('[pdftotext] Direct text extraction skipped/failed:', e.message);
+  } finally {
+    try { await fs.promises.unlink(inputPath); } catch {}
+    try { await fs.promises.unlink(outputPath); } catch {}
+  }
+  return '';
+}
 
 export interface ExtractedProductInfo {
   productName: string;
@@ -477,19 +548,19 @@ export interface ExtractedBankStatementInfo {
  * Extracts structured transaction details from a bank statement PDF/image using Gemini.
  */
 export async function extractBankStatementDetails(buffer: Buffer, mimeType: string): Promise<ExtractedBankStatementInfo> {
-  try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
+  const isPdf = mimeType === 'application/pdf' || mimeType.includes('pdf');
+  let extractedText = '';
+  if (isPdf) {
+    try {
+      extractedText = await extractTextFromPdf(buffer);
+      console.log(`[Bank Statement] Extracted ${extractedText.length} characters of structured text from PDF.`);
+    } catch (e: any) {
+      console.warn('[Bank Statement] Text extraction warning:', e.message);
+    }
+  }
 
-    const docPart = {
-      inlineData: {
-        data: buffer.toString('base64'),
-        mimeType: mimeType
-      }
-    };
-
-    const prompt = `You are an expert accountant with deep knowledge of Tally Prime, Indian banking systems, and bank statement reconciliation.
-
-Your task is to analyze a bank statement (PDF or image) and convert it into structured banking data for Tally accounting.
+  const baseInstructions = `You are an expert accountant with deep knowledge of Tally Prime, Indian banking systems, and bank statement reconciliation.
+Analyze this bank statement and convert it into structured banking data for Tally accounting.
 
 STEP 1: IDENTIFY THE BANK & ACCOUNT
 - Identify the exact BANK NAME from the header, logo, or branch details (e.g., "ICICI Bank", "HDFC Bank", "State Bank of India", "Axis Bank", "Kotak Mahindra Bank", "Bank of Baroda", "Punjab National Bank", "Canara Bank", "IndusInd Bank", "Federal Bank").
@@ -519,16 +590,23 @@ STEP 2: EXTRACT EVERY TRANSACTION
 
 Return strictly valid JSON following the schema.`;
 
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
+
+    let contentsParts: any[] = [];
+    if (extractedText.length > 100) {
+      contentsParts = [
+        { text: `${baseInstructions}\n\n--- BANK STATEMENT TEXT CONTENT ---\n${extractedText}` }
+      ];
+    } else {
+      contentsParts = [
+        { text: baseInstructions },
+        { inlineData: { data: buffer.toString('base64'), mimeType: mimeType || 'application/pdf' } }
+      ];
+    }
+
     const result = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: prompt },
-            docPart
-          ]
-        }
-      ],
+      contents: [{ role: 'user', parts: contentsParts }],
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: bankStatementExtractionSchema as any
@@ -540,19 +618,30 @@ Return strictly valid JSON following the schema.`;
       throw new Error('Gemini returned empty content.');
     }
 
-    return JSON.parse(responseText) as ExtractedBankStatementInfo;
+    return parseGeminiJson<ExtractedBankStatementInfo>(responseText);
   } catch (error: any) {
-    console.error('Gemini bank statement extraction error:', error);
+    console.error('Gemini bank statement extraction error:', error.message || error);
     try {
       console.log('Retrying bank statement extraction with gemini-flash-lite-latest fallback...');
       const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-flash-lite-latest' });
-      const docPart = { inlineData: { data: buffer.toString('base64'), mimeType } };
-      const fallbackPrompt = `Extract bankName (e.g. ICICI Bank, HDFC Bank), accountNumber, openingBalance, closingBalance, statementPeriod, and all transactions as JSON with date (YYYY-MM-DD), voucherType (Payment/Receipt/Contra/Journal), partyName, amount, bankLedger, narration, referenceNumber, confidence, reason.`;
+      
+      let fallbackParts: any[] = [];
+      if (extractedText.length > 100) {
+        fallbackParts = [
+          { text: `Extract bankName, accountNumber, openingBalance, closingBalance, statementPeriod, and all transactions as JSON with date (YYYY-MM-DD), voucherType (Payment/Receipt/Contra/Journal), partyName, amount, bankLedger, narration, referenceNumber, confidence, reason from this text:\n\n${extractedText}` }
+        ];
+      } else {
+        fallbackParts = [
+          { text: `Extract bankName, accountNumber, openingBalance, closingBalance, statementPeriod, and all transactions as JSON with date (YYYY-MM-DD), voucherType (Payment/Receipt/Contra/Journal), partyName, amount, bankLedger, narration, referenceNumber, confidence, reason.` },
+          { inlineData: { data: buffer.toString('base64'), mimeType: mimeType || 'application/pdf' } }
+        ];
+      }
+
       const fallbackResult = await fallbackModel.generateContent({
-        contents: [{ role: 'user', parts: [{ text: fallbackPrompt }, docPart] }],
+        contents: [{ role: 'user', parts: fallbackParts }],
         generationConfig: { responseMimeType: 'application/json', responseSchema: bankStatementExtractionSchema as any }
       });
-      return JSON.parse(fallbackResult.response.text()) as ExtractedBankStatementInfo;
+      return parseGeminiJson<ExtractedBankStatementInfo>(fallbackResult.response.text());
     } catch (fallbackError: any) {
       throw new Error(`Gemini bank statement extraction failed: ${error.message || error}`);
     }
