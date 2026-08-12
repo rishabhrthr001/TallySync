@@ -736,8 +736,9 @@ async function syncEntry(entry) {
             const masterData = await getLedgerList(entry.companyName);
 
             // 2. Resolve/create party ledger and bank ledger
-            const bankName = (entry.bankLedger || 'HDFC BANK').trim();
+            const bankName = (entry.bankLedger || 'Bank Account').trim();
             const partyName = (entry.partyName || 'Bank Adjustments').trim();
+            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Party: "${partyName}"`);
 
             const ledgersNeeded = [];
 

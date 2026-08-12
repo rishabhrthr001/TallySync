@@ -54,8 +54,7 @@ const Entries: React.FC = () => {
   const printRef = useRef<HTMLDivElement>(null);
 
   const handlePrintAction = useReactToPrint({
-    contentRef: printRef,
-    content: () => printRef.current
+    contentRef: printRef
   });
 
   // Trigger actual print only after printData is set and component re-renders
@@ -234,13 +233,25 @@ const Entries: React.FC = () => {
                   >
                     <td className="px-8 py-5">
                       <div className="text-sm font-black text-slate-800 leading-tight">{e.partyName}</div>
-                      {e.notes && <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5">{e.notes}</div>}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {e.bankLedger && (
+                          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100/80">
+                            🏦 {e.bankLedger}
+                          </span>
+                        )}
+                        {e.notes && <span className="text-[11px] text-slate-400 truncate max-w-xs">{e.notes}</span>}
+                      </div>
                     </td>
                     <td className="px-8 py-5 text-center">
                       <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
-                        e.type === 'sales' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'
+                        e.type === 'sales' ? 'bg-indigo-50 text-indigo-700' : 
+                        e.type === 'purchase' ? 'bg-amber-50 text-amber-700' :
+                        e.type === 'receipt' ? 'bg-emerald-50 text-emerald-700' :
+                        e.type === 'payment' ? 'bg-rose-50 text-rose-700' :
+                        e.type === 'contra' ? 'bg-purple-50 text-purple-700' :
+                        'bg-slate-100 text-slate-700'
                       }`}>
-                        {e.type === 'sales' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                        {e.type === 'sales' || e.type === 'receipt' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                         {e.type}
                       </span>
                     </td>

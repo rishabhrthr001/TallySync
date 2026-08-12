@@ -3,7 +3,7 @@ import axios from 'axios';
 import { 
   Plus, Trash2, Save, Send, Printer, User, CreditCard, Upload, CheckCircle2, 
   ExternalLink, Camera, Lock, Check, Crown, FileText, ShoppingBag, ShoppingCart, 
-  Receipt, Calculator, Sparkles, Percent 
+  Receipt, Calculator, Sparkles, Percent, Zap 
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useNavigate } from 'react-router-dom';
@@ -208,7 +208,7 @@ const CreateEntry: React.FC = () => {
 
   // Print Setup
   const contentRef = useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({ contentRef, content: () => contentRef.current });
+  const handlePrint = useReactToPrint({ contentRef });
 
   const getInvoiceData = (): InvoiceData => ({
     type, 
@@ -1296,7 +1296,7 @@ const CreateEntry: React.FC = () => {
               <div className="flex gap-4">
                 <button 
                   onClick={() => {
-                    setType(reviewData.type || 'purchase');
+                    setEntryMode(reviewData.type || 'purchase');
                     setPartyName(reviewData.partyName);
                     setPartyGstin(reviewData.partyGstin || '');
                     setInvoiceNumber(reviewData.invoiceNumber);

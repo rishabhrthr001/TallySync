@@ -36,6 +36,7 @@ const Dashboard: React.FC = () => {
   const [bankFile, setBankFile] = useState<File | null>(null);
   const [parsingBank, setParsingBank] = useState(false);
   const [bankParseResult, setBankParseResult] = useState<any>(null);
+  const [targetBankLedger, setTargetBankLedger] = useState<string>('');
   const [tempTransactions, setTempTransactions] = useState<any[]>([]);
   const [syncSaving, setSyncSaving] = useState(false);
   const [bankPassword, setBankPassword] = useState<string>('');
@@ -47,6 +48,11 @@ const Dashboard: React.FC = () => {
 
   const removeTempTxn = (index: number) => {
     setTempTransactions(prev => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleApplyBankLedgerToAll = (newBank: string) => {
+    setTargetBankLedger(newBank);
+    setTempTransactions(prev => prev.map(t => ({ ...t, bankLedger: newBank })));
   };
 
   const handleBankUpload = async (e: React.FormEvent) => {
@@ -77,9 +83,11 @@ const Dashboard: React.FC = () => {
           Authorization: `Bearer ${localStorage.getItem('token')}`
         }
       });
+      const detectedBank = (res.data.bankName || 'Bank Account').trim();
       setBankParseResult(res.data);
+      setTargetBankLedger(detectedBank);
       setTempTransactions(res.data.data || []);
-      showToast(`Successfully extracted ${res.data.count} transactions. Please review them below!`, 'success');
+      showToast(`Detected ${detectedBank}! Extracted ${res.data.count} transactions. Review before syncing.`, 'success');
     } catch (err: any) {
       console.error(err);
       showToast(err.response?.data?.error || 'Failed to parse bank statement', 'error');
@@ -95,14 +103,24 @@ const Dashboard: React.FC = () => {
     }
     setSyncSaving(true);
     try {
-      const res = await axios.post('/api/entries/bulk', { transactions: tempTransactions }, {
+      const bankName = (targetBankLedger || 'Bank Account').trim();
+      const enrichedTransactions = tempTransactions.map(t => ({
+        ...t,
+        bankLedger: (t.bankLedger || bankName).trim()
+      }));
+
+      const res = await axios.post('/api/entries/bulk', { 
+        transactions: enrichedTransactions,
+        bankName 
+      }, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-      showToast(`Successfully synced ${res.data.count} bank statement transactions!`, 'success');
+      showToast(`Successfully queued ${res.data.count} transactions for ${bankName} in Tally!`, 'success');
       setIsBankModalOpen(false);
       setBankFile(null);
       setBankParseResult(null);
       setTempTransactions([]);
+      setTargetBankLedger('');
       setBankPassword('');
       fetchData();
     } catch (err: any) {
@@ -633,9 +651,14 @@ const Dashboard: React.FC = () => {
               >
                 <div className="flex items-center gap-4.5 min-w-0">
                   <div className={`p-3 rounded-2xl shrink-0 ${
-                    e.type === 'sales' ? 'bg-indigo-50 text-indigo-650' : 'bg-amber-50 text-amber-650'
+                    e.type === 'sales' ? 'bg-indigo-50 text-indigo-650' : 
+                    e.type === 'purchase' ? 'bg-amber-50 text-amber-650' :
+                    e.type === 'receipt' ? 'bg-emerald-50 text-emerald-650' :
+                    e.type === 'payment' ? 'bg-rose-50 text-rose-650' :
+                    e.type === 'contra' ? 'bg-purple-50 text-purple-650' :
+                    'bg-slate-100 text-slate-650'
                   }`}>
-                    {e.type === 'sales' ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+                    {e.type === 'sales' || e.type === 'receipt' ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
                   </div>
                   <div className="min-w-0 flex flex-col">
                     {/* Invoice Number on mobile (above party name) */}
@@ -645,10 +668,20 @@ const Dashboard: React.FC = () => {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-black text-slate-850 truncate leading-snug">{e.partyName}</p>
                       <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                        e.type === 'sales' ? 'bg-indigo-50/80 text-indigo-700' : 'bg-amber-50/80 text-amber-700'
+                        e.type === 'sales' ? 'bg-indigo-50/80 text-indigo-700' : 
+                        e.type === 'purchase' ? 'bg-amber-50/80 text-amber-700' :
+                        e.type === 'receipt' ? 'bg-emerald-50/80 text-emerald-700' :
+                        e.type === 'payment' ? 'bg-rose-50/80 text-rose-700' :
+                        e.type === 'contra' ? 'bg-purple-50/80 text-purple-700' :
+                        'bg-slate-100 text-slate-700'
                       }`}>
                         {e.type}
                       </span>
+                      {e.bankLedger && (
+                        <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100/80">
+                          🏦 {e.bankLedger}
+                        </span>
+                      )}
                     </div>
                     {/* Invoice Number on desktop (below party name) */}
                     <p className="hidden sm:block text-[10px] font-bold text-slate-400 mt-1 font-mono tracking-wide">
@@ -747,7 +780,7 @@ const Dashboard: React.FC = () => {
       {/* Bank Statement Modal */}
       {isBankModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full shadow-2xl overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-emerald-50 text-emerald-605 rounded-xl">
@@ -834,30 +867,98 @@ const Dashboard: React.FC = () => {
                   </div>
                 </>
               ) : (
-                <div className="space-y-5">
-                  <div className="text-center py-5 bg-indigo-50/60 rounded-2xl border border-indigo-100 flex flex-col items-center">
-                    <CheckCircle2 className="h-10 w-10 text-indigo-600 mb-2" />
-                    <h4 className="text-lg font-black text-indigo-900">Extracted Vouchers</h4>
-                    <p className="text-xs font-bold text-indigo-600 mt-1 uppercase tracking-wider">
-                      Please review and adjust transactions before syncing to Tally
-                    </p>
+                <div className="space-y-4">
+                  {/* Bank Workspace Header Card */}
+                  <div className="p-4 bg-gradient-to-br from-indigo-50/90 via-slate-50 to-emerald-50/50 rounded-2xl border border-indigo-100/80 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs">
+                          <CreditCard className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">
+                            Target Bank Workspace
+                          </div>
+                          <div className="text-sm font-black text-slate-850 flex items-center gap-1.5">
+                            {targetBankLedger || 'Bank Account'}
+                            {bankParseResult?.accountNumber && (
+                              <span className="text-[11px] font-semibold text-slate-400">
+                                (A/c: {bankParseResult.accountNumber})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {bankParseResult?.statementPeriod?.from && (
+                        <div className="text-right">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Period</span>
+                          <span className="text-[11px] font-bold text-slate-600">
+                            {bankParseResult.statementPeriod.from} to {bankParseResult.statementPeriod.to || 'Present'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Target Ledger Editor in Tally */}
+                    <div className="pt-2 border-t border-slate-200/60 grid grid-cols-1 sm:grid-cols-3 gap-2 items-center">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider col-span-1">
+                        Bank Ledger Name in Tally:
+                      </label>
+                      <div className="col-span-2 flex gap-1.5">
+                        <input 
+                          type="text"
+                          value={targetBankLedger}
+                          onChange={(e) => handleApplyBankLedgerToAll(e.target.value)}
+                          placeholder="e.g. ICICI Bank, HDFC Bank"
+                          className="flex-1 px-3 py-1.5 bg-white border border-slate-250 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Auto creation notice */}
+                    <div className="flex items-start gap-1.5 text-[10px] text-indigo-700/90 font-semibold bg-indigo-100/50 p-2 rounded-xl">
+                      <Sparkles className="h-3.5 w-3.5 text-indigo-600 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>Auto Tally Sync:</strong> If <strong>"{targetBankLedger || 'Bank Account'}"</strong> does not exist in Tally, TallySync will automatically create the bank ledger under <strong>Bank Accounts</strong> before posting vouchers.
+                      </span>
+                    </div>
+
+                    {/* Financial stats summary */}
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      <div className="p-2 bg-white/80 rounded-xl border border-slate-200/60 text-center">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Total Txns</span>
+                        <span className="text-xs font-black text-slate-800">{tempTransactions.length}</span>
+                      </div>
+                      <div className="p-2 bg-white/80 rounded-xl border border-emerald-200/60 text-center">
+                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider block">Money In (Receipts)</span>
+                        <span className="text-xs font-black text-emerald-700">
+                          ₹{tempTransactions.filter(t => t.type === 'receipt').reduce((acc, t) => acc + (Number(t.totalAmount) || 0), 0).toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                      <div className="p-2 bg-white/80 rounded-xl border border-rose-200/60 text-center">
+                        <span className="text-[9px] font-black text-rose-600 uppercase tracking-wider block">Money Out (Payments)</span>
+                        <span className="text-xs font-black text-rose-700">
+                          ₹{tempTransactions.filter(t => t.type === 'payment').reduce((acc, t) => acc + (Number(t.totalAmount) || 0), 0).toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                   
                   {/* Preview list */}
-                  <div className="max-h-96 overflow-y-auto space-y-3.5 pr-1.5">
+                  <div className="max-h-80 overflow-y-auto space-y-3 pr-1.5">
                     {tempTransactions.map((txn: any, idx: number) => (
-                      <div key={idx} className="relative p-4 bg-slate-50 hover:bg-white rounded-2xl border border-slate-200/80 hover:border-indigo-200 transition-all shadow-xs space-y-3.5">
+                      <div key={idx} className="relative p-3.5 bg-slate-50 hover:bg-white rounded-2xl border border-slate-200/80 hover:border-indigo-200 transition-all shadow-xs space-y-3">
                         <button
                           type="button"
                           onClick={() => removeTempTxn(idx)}
-                          className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
+                          className="absolute top-2.5 right-2.5 text-slate-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
                           title="Exclude transaction"
                         >
-                          <Trash2 className="h-4.5 w-4.5" />
+                          <Trash2 className="h-4 w-4" />
                         </button>
 
                         {/* Top metadata row */}
-                        <div className="grid grid-cols-2 gap-3.5">
+                        <div className="grid grid-cols-2 gap-2.5 pr-6">
                           <div>
                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Date</label>
                             <input 
@@ -874,27 +975,38 @@ const Dashboard: React.FC = () => {
                               onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
                               className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400 uppercase"
                             >
-                              <option value="payment">Payment</option>
-                              <option value="receipt">Receipt</option>
-                              <option value="contra">Contra</option>
+                              <option value="payment">Payment (Money Out)</option>
+                              <option value="receipt">Receipt (Money In)</option>
+                              <option value="contra">Contra (Bank/Cash Transfer)</option>
                               <option value="journal">Journal</option>
                             </select>
                           </div>
                         </div>
 
-                        {/* Party name input */}
-                        <div>
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Party / Ledger Name</label>
-                          <input 
-                            type="text"
-                            value={txn.partyName}
-                            onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400"
-                          />
+                        {/* Party name input & Bank ledger */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <div>
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Party / Counter Ledger</label>
+                            <input 
+                              type="text"
+                              value={txn.partyName}
+                              onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Bank Ledger</label>
+                            <input 
+                              type="text"
+                              value={txn.bankLedger || targetBankLedger}
+                              onChange={(e) => updateTempTxn(idx, 'bankLedger', e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-indigo-700 outline-none focus:border-indigo-400"
+                            />
+                          </div>
                         </div>
 
                         {/* Amount & Notes */}
-                        <div className="grid grid-cols-3 gap-3.5 items-end">
+                        <div className="grid grid-cols-3 gap-2.5 items-end">
                           <div className="col-span-1">
                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Amount (₹)</label>
                             <input 
@@ -905,7 +1017,7 @@ const Dashboard: React.FC = () => {
                             />
                           </div>
                           <div className="col-span-2">
-                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Narration</label>
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Narration / Description</label>
                             <input 
                               type="text"
                               value={txn.notes}
@@ -918,7 +1030,7 @@ const Dashboard: React.FC = () => {
 
                         {/* Quality score bar */}
                         {txn.confidence !== undefined && (
-                          <div className="flex items-center gap-2 pt-1.5 border-t border-slate-100/80 text-[9px] font-bold text-slate-450 uppercase tracking-wider">
+                          <div className="flex items-center gap-2 pt-1 border-t border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
                             <span>Confidence:</span>
                             <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                               <div 
@@ -934,7 +1046,7 @@ const Dashboard: React.FC = () => {
                   </div>
 
                   {/* Submit / Cancel Actions */}
-                  <div className="flex gap-3 pt-3">
+                  <div className="flex gap-3 pt-2">
                     <button
                       type="button"
                       onClick={() => {
@@ -942,8 +1054,9 @@ const Dashboard: React.FC = () => {
                         setBankFile(null);
                         setBankParseResult(null);
                         setTempTransactions([]);
+                        setTargetBankLedger('');
                       }}
-                      className="flex-1 py-3.5 border border-slate-250 hover:bg-slate-50 text-slate-600 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center"
+                      className="flex-1 py-3 border border-slate-250 hover:bg-slate-50 text-slate-600 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center"
                       disabled={syncSaving}
                     >
                       Discard Vouchers
@@ -952,7 +1065,7 @@ const Dashboard: React.FC = () => {
                       type="button"
                       onClick={handleConfirmAndSyncBank}
                       disabled={syncSaving || tempTransactions.length === 0}
-                      className="flex-2 py-3.5 bg-gradient-to-tr from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/10 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      className="flex-2 py-3 bg-gradient-to-tr from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/10 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     >
                       {syncSaving ? (
                         <>
@@ -962,7 +1075,7 @@ const Dashboard: React.FC = () => {
                       ) : (
                         <>
                           <Check className="h-4 w-4" />
-                          Confirm & Sync ({tempTransactions.length})
+                          Confirm & Sync ({tempTransactions.length}) to {targetBankLedger || 'Tally'}
                         </>
                       )}
                     </button>

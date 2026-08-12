@@ -560,9 +560,10 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
       throw parseErr;
     }
     const rawTransactions = data.transactions || [];
+    const detectedBank = (data.bankName || 'Bank Account').trim();
 
     const formattedTransactions = rawTransactions.map((txn: any) => {
-      const lowercaseType = txn.voucherType.toLowerCase();
+      const lowercaseType = (txn.voucherType || 'Payment').toLowerCase();
       let party = txn.partyName || '';
       if (!party) {
         if (lowercaseType === 'payment') {
@@ -582,11 +583,21 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
         notes: txn.narration || '',
         confidence: txn.confidence || 1.0,
         reason: txn.reason || '',
-        bankLedger: txn.bankLedger || 'HDFC BANK'
+        bankLedger: (txn.bankLedger || detectedBank).trim()
       };
     });
 
-    res.json({ success: true, count: formattedTransactions.length, data: formattedTransactions });
+    res.json({ 
+      success: true, 
+      count: formattedTransactions.length, 
+      bankName: detectedBank,
+      accountNumber: data.accountNumber || '',
+      ifsc: data.ifsc || '',
+      openingBalance: data.openingBalance || 0,
+      closingBalance: data.closingBalance || 0,
+      statementPeriod: data.statementPeriod || null,
+      data: formattedTransactions 
+    });
   } catch (error: any) {
     console.error('Bank statement parsing error DETAIL:', error);
     res.status(500).json({ error: `Failed to parse bank statement: ${error.message}` });
@@ -595,7 +606,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
 
 // Bulk insert reviewed bank statement transactions or other vouchers
 router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, res) => {
-  const { transactions } = req.body;
+  const { transactions, bankName } = req.body;
   if (!Array.isArray(transactions)) {
     return res.status(400).json({ error: 'Invalid transactions array' });
   }
@@ -615,6 +626,8 @@ router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, re
         continue;
       }
 
+      const assignedBankLedger = (txn.bankLedger || bankName || 'Bank Account').trim();
+
       const newEntry = new Entry({
         userId: req.user.id,
         companyName: req.user.companyName,
@@ -629,6 +642,7 @@ router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, re
         totalAmount: txn.totalAmount,
         gstType: 'cgst-sgst',
         status: 'pending',
+        bankLedger: assignedBankLedger,
         notes: txn.notes || 'Bulk imported bank transaction',
         idempotencyKey
       });
