@@ -154,7 +154,8 @@ const Entries: React.FC = () => {
 
   return (
     <Layout>
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-8">
+      <div className="print-hidden-mobile">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-8">
         <div>
           <span className="text-xs font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-wider">Audit History</span>
           <h2 className="text-3xl font-black text-slate-900 tracking-tight mt-1.5">Voucher History</h2>
@@ -447,6 +448,7 @@ const Entries: React.FC = () => {
           </div>
         )}
       </div>
+    </div>
 
       {/* Screen-Only Print Preview Modal */}
       <AnimatePresence>
@@ -498,7 +500,7 @@ const Entries: React.FC = () => {
       </AnimatePresence>
 
       {/* Dedicated Standalone Native Print Container */}
-      <div className="hidden print:block fixed -top-[9999px] -left-[9999px]">
+      <div id="printable-invoice-root" className="hidden print:block print:static absolute top-[-9999px] left-[-9999px] font-sans text-black">
         {printData && <PrintableInvoice ref={printRef} data={printData} user={user} />}
       </div>
     </Layout>

@@ -372,7 +372,8 @@ const Dashboard: React.FC = () => {
 
   return (
     <Layout>
-      {/* Header section */}
+      <div className="print-hidden-mobile">
+        {/* Header section */}
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-5 mb-8">
         <div>
           <div className="flex items-center gap-2">
@@ -794,10 +795,11 @@ const Dashboard: React.FC = () => {
           </Link>
         </div>
       </div>
+    </div>
 
       {/* Off-screen container for react-to-print to prevent mobile fallbacks */}
       {printData && (
-        <div className="print-container absolute top-[-9999px] left-[-9999px] print:static print:block">
+        <div id="printable-invoice-root" className="print-container absolute top-[-9999px] left-[-9999px] print:static print:block font-sans text-black">
           <PrintableInvoice ref={printRef} data={printData} user={user} />
         </div>
       )}

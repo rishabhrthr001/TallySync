@@ -359,7 +359,7 @@ const CreateEntry: React.FC = () => {
 
   return (
     <Layout>
-      <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4 mb-6 border-b border-slate-200/50 pb-6">
+      <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4 mb-6 border-b border-slate-200/50 pb-6 print-hidden-mobile">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tight">Rapid Billing</h2>
           <p className="text-slate-400 text-sm font-semibold mt-0.5">{user?.companyName} • Fast Invoice Engine</p>
@@ -417,7 +417,7 @@ const CreateEntry: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start print-hidden-mobile">
         {/* Left Form Column */}
         <form onSubmit={handleSubmit} className="lg:col-span-7 bg-white p-6 md:p-8 rounded-3xl border border-slate-200/60 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.03)] space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

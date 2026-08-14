@@ -125,3 +125,9 @@ body {
   }
 }
 
+@media print and (max-width: 768px) {
+  .print-hidden-mobile {
+    display: none !important;
+  }
+}
+

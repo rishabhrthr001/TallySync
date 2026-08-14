@@ -165,7 +165,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       </aside>
 
       {/* Mobile Top Navigation Header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-md border-b border-slate-200/60 px-5 py-3.5 flex items-center justify-between z-40">
+      <div className="md:hidden print-hidden-mobile fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-md border-b border-slate-200/60 px-5 py-3.5 flex items-center justify-between z-40">
         <div className="flex items-center space-x-2.5">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-md shadow-indigo-500/20">
             <FileText className="text-white w-4.5 h-4.5" />
@@ -188,7 +188,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       </div>
 
       {/* Mobile Bottom Navigation Tab Bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/60 px-2 py-1 flex items-center justify-around z-40 pb-safe shadow-[0_-10px_30px_rgba(15,23,42,0.03)]">
+      <div className="md:hidden print-hidden-mobile fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/60 px-2 py-1 flex items-center justify-around z-40 pb-safe shadow-[0_-10px_30px_rgba(15,23,42,0.03)]">
         {mobileTabs.map((tab, idx) => {
           const isActive = location.pathname === tab.path;
 
@@ -237,7 +237,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsMobileMenuOpen(false)}
-              className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-40 md:hidden"
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-40 md:hidden print-hidden-mobile"
             />
             {/* Drawer */}
             <motion.div
@@ -245,7 +245,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[2.5rem] z-50 md:hidden px-6 pt-5 pb-8 shadow-[0_-20px_50px_rgba(0,0,0,0.15)] max-h-[85vh] overflow-y-auto"
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[2.5rem] z-50 md:hidden print-hidden-mobile px-6 pt-5 pb-8 shadow-[0_-20px_50px_rgba(0,0,0,0.15)] max-h-[85vh] overflow-y-auto"
             >
               {/* Drag Handle Indicator */}
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
