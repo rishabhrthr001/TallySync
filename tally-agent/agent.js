@@ -433,7 +433,7 @@ function fmtQty(qty, unit = 'Nos') {
     return `${Number.isInteger(n) ? n : n.toFixed(2)} ${unit}`;
 }
 
-function buildEnvelope(entry, voucherType, dateStr, bodyXml, objView = '', forcedDate = false) {
+function buildEnvelope(entry, voucherType, dateStr, bodyXml, objView = '', forcedDate = false, tallyGuid = null) {
     let narration = entry.items && entry.items.length > 0
         ? `${voucherType} ${entry.invoiceNumber}: ${entry.items.map(i => `${i.name} x${i.quantity}`).join(', ')} — via TallySync`
         : `${voucherType} ${entry.invoiceNumber} — via TallySync`;
@@ -442,7 +442,13 @@ function buildEnvelope(entry, voucherType, dateStr, bodyXml, objView = '', force
         narration += ` (Original Date: ${entry.date} adjusted to 1st of month for Educational Mode compatibility)`;
     }
 
+    if (entry.notes) {
+        narration += `\n${entry.notes}`;
+    }
+
     const objViewAttr = objView ? ` OBJVIEW="${objView}"` : '';
+    const action = tallyGuid ? 'Alter' : 'Create';
+    const guidXml = tallyGuid ? `<GUID>${escapeXML(tallyGuid)}</GUID>` : '';
 
     return `
 <ENVELOPE>
@@ -458,7 +464,8 @@ function buildEnvelope(entry, voucherType, dateStr, bodyXml, objView = '', force
             </REQUESTDESC>
             <REQUESTDATA>
                 <TALLYMESSAGE xmlns:UDF="TallyUDF">
-                    <VOUCHER VCHTYPE="${voucherType}" ACTION="Create"${objViewAttr}>
+                    <VOUCHER VCHTYPE="${voucherType}" ACTION="${action}"${objViewAttr}>
+                        ${guidXml}
                         <DATE>${dateStr}</DATE>
                         <EFFECTIVEDATE>${dateStr}</EFFECTIVEDATE>
                         <VOUCHERTYPENAME>${voucherType}</VOUCHERTYPENAME>
@@ -546,7 +553,7 @@ function generateInventoryVoucherXML(entry, partyName, incomeLedger, taxLedgers,
                         ${inventoryLines}
                         ${taxLines}`;
 
-    return buildEnvelope(entry, voucherType, dateStr, body, 'Invoice Voucher View', forceFirstOfMonth);
+    return buildEnvelope(entry, voucherType, dateStr, body, 'Invoice Voucher View', forceFirstOfMonth, entry.tallyGuid);
 }
 
 /**
@@ -596,7 +603,7 @@ function generateAccountingVoucherXML(entry, partyName, incomeLedger, taxLedgers
                         </LEDGERENTRIES.LIST>
                         ${taxLines}`;
 
-    return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth);
+    return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth, entry.tallyGuid);
 }
 
 function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceFirstOfMonth = false) {
@@ -622,7 +629,7 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
                             <AMOUNT>${amount.toFixed(2)}</AMOUNT>
                         </LEDGERENTRIES.LIST>`;
-        return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth);
+        return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth, entry.tallyGuid);
     }
 
     // --- Bank Voucher (Payment / Receipt / Contra) ---
@@ -725,7 +732,7 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                         ${bankEntryXml}
                         ${partyEntryXml}`;
 
-    return buildEnvelope(entry, voucherType, dateStr, body, 'Banking Voucher View', forceFirstOfMonth);
+    return buildEnvelope(entry, voucherType, dateStr, body, 'Banking Voucher View', forceFirstOfMonth, entry.tallyGuid);
 }
 
 /**
@@ -1101,6 +1108,15 @@ async function syncEntry(entry) {
         let voucherCreated = false;
         let forcedDate = false;
 
+        const matchedTally = TALLY_VOUCHERS_CACHE.find(v => 
+            v.voucherNumber === entry.invoiceNumber || v.reference === entry.invoiceNumber
+        );
+        entry.tallyGuid = matchedTally ? matchedTally.guid : null;
+
+        if (entry.tallyGuid) {
+            console.log(`[VOUCHER] Found existing voucher in Tally (GUID: ${entry.tallyGuid}). Will Alter/Update it.`);
+        }
+
         // Step 5a: Try INVENTORY VOUCHER first if entry has items
         if (hasValidItems) {
             console.log(`\n[VOUCHER] Attempting detailed inventory voucher for ${entry.invoiceNumber}...`);
@@ -1458,6 +1474,8 @@ function parseVouchersFromXml(xml) {
     return vouchers;
 }
 
+let TALLY_VOUCHERS_CACHE = [];
+
 async function syncTallyTransactions(companyName) {
     try {
         console.log(`[SYNC-TXN] 🔄 Fetching transactions from Tally Day Book for "${companyName}"...`);
@@ -1483,6 +1501,8 @@ async function syncTallyTransactions(companyName) {
         
         const responseXml = await tallyRequest(xml);
         const parsedTxns = parseVouchersFromXml(responseXml);
+        
+        TALLY_VOUCHERS_CACHE = parsedTxns;
         
         console.log(`[SYNC-TXN]   • Found ${parsedTxns.length} total vouchers in Tally.`);
         
