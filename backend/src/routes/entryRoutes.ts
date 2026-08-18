@@ -741,6 +741,85 @@ router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, re
   }
 });
 
+// Bulk insert reconciled purchase entries from GSTR-2A/2B comparison
+router.post('/reconciled-bulk', authenticateToken, checkDailyBillLimit, async (req: any, res) => {
+  const { entries } = req.body;
+  if (!Array.isArray(entries)) {
+    return res.status(400).json({ error: 'Invalid entries array' });
+  }
+
+  const createdEntries = [];
+
+  try {
+    for (const e of entries) {
+      const refNum = e.invoiceNumber || `PUR-${Math.floor(Math.random() * 9000000000) + 1000000000}`;
+      const dateStr = e.date || new Date().toISOString().split('T')[0];
+      const totalAmt = Number(e.totalAmount || 0);
+      const taxableAmt = Number(e.taxableAmount || totalAmt);
+      const taxAmt = Number(e.taxAmount || 0);
+      
+      const idempotencyKey = `${req.user.companyName}-${refNum}-${totalAmt}-${dateStr}`;
+
+      // Check if entry already exists (prevent duplicate entries)
+      const existing = await Entry.findOne({ idempotencyKey, companyName: req.user.companyName });
+      if (existing) {
+        createdEntries.push(existing);
+        continue;
+      }
+
+      // Default item
+      const gstRate = taxableAmt > 0 && taxAmt > 0 ? Math.round((taxAmt / taxableAmt) * 100) : 18;
+      const defaultItem = {
+        name: `Supply of Goods / Services (Purchase)`,
+        quantity: 1,
+        rate: taxableAmt,
+        amount: taxableAmt,
+        gst: gstRate,
+        hsn: '9983',
+        unit: 'NOS'
+      };
+
+      const newEntry = new Entry({
+        userId: req.user.id,
+        companyName: req.user.companyName,
+        type: 'purchase',
+        partyName: e.partyName || 'Cash Purchase',
+        partyGstin: e.partyGstin || '',
+        invoiceNumber: refNum,
+        date: dateStr,
+        items: [defaultItem],
+        taxableAmount: taxableAmt,
+        taxAmount: taxAmt,
+        totalAmount: totalAmt,
+        gstType: e.gstType || 'cgst-sgst',
+        status: 'pending',
+        notes: e.notes || 'Auto-imported from GSTR-2A/2B Reconciliation',
+        idempotencyKey
+      });
+
+      await newEntry.save();
+      createdEntries.push(newEntry);
+
+      // Update/Create Ledger
+      await Ledger.findOneAndUpdate(
+        { companyName: req.user.companyName, partyName: newEntry.partyName },
+        { 
+          $inc: { balance: -newEntry.totalAmount }, 
+          $set: { 
+            updatedAt: new Date(), 
+            userId: req.user.id
+          } 
+        },
+        { upsert: true }
+      );
+    }
+
+    res.json({ success: true, count: createdEntries.length, data: createdEntries });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Bulk retry entries for Tally sync (used by GST 2A/2B pages)
 router.post('/bulk-retry', authenticateToken, async (req: any, res) => {
   const { entryIds, withItems } = req.body;
