@@ -820,6 +820,65 @@ router.post('/reconciled-bulk', authenticateToken, checkDailyBillLimit, async (r
   }
 });
 
+// Bulk update mismatched purchase entries from GSTR-2A/2B comparison
+router.post('/reconciled-update', authenticateToken, async (req: any, res) => {
+  const { updates } = req.body;
+  if (!Array.isArray(updates)) {
+    return res.status(400).json({ error: 'Invalid updates array' });
+  }
+
+  const updatedEntries = [];
+
+  try {
+    for (const update of updates) {
+      const entry = await Entry.findOne({ _id: update.entryId, companyName: req.user.companyName });
+      if (!entry) continue;
+
+      const oldAmount = entry.totalAmount || 0;
+      const newAmount = Number(update.totalAmount || 0);
+
+      // Update entry fields
+      entry.totalAmount = newAmount;
+      entry.taxableAmount = Number(update.taxableAmount || newAmount);
+      entry.taxAmount = Number(update.taxAmount || 0);
+      entry.date = update.date || entry.date;
+      if (update.partyGstin) entry.partyGstin = update.partyGstin;
+      if (update.partyName) entry.partyName = update.partyName;
+      entry.status = 'pending'; // Re-queue for Tally sync
+      entry.notes = `${entry.notes || ''}\n[Updated from GSTR Reconciliation on ${new Date().toISOString().split('T')[0]}]`;
+
+      // Update items rate/amount to match new taxableAmount
+      if (entry.items && entry.items.length > 0) {
+        entry.items[0].rate = entry.taxableAmount;
+        entry.items[0].amount = entry.taxableAmount;
+      }
+
+      await entry.save();
+      updatedEntries.push(entry);
+
+      // Adjust Ledger balance
+      const diff = oldAmount - newAmount;
+      if (diff !== 0) {
+        await Ledger.findOneAndUpdate(
+          { companyName: req.user.companyName, partyName: entry.partyName },
+          { 
+            $inc: { balance: diff }, 
+            $set: { 
+              updatedAt: new Date(), 
+              userId: req.user.id
+            } 
+          },
+          { upsert: true }
+        );
+      }
+    }
+
+    res.json({ success: true, count: updatedEntries.length, data: updatedEntries });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Bulk retry entries for Tally sync (used by GST 2A/2B pages)
 router.post('/bulk-retry', authenticateToken, async (req: any, res) => {
   const { entryIds, withItems } = req.body;

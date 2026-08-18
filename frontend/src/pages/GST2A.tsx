@@ -595,6 +595,49 @@ const GST2A = () => {
     }
   };
 
+  // Update existing TallySync entry with GSTR details and sync to Tally
+  const handleSingleUpdateAndSync = async (item: ReconciliationItem) => {
+    if (!item.tallyEntry) return;
+    try {
+      setIsImporting(true);
+      const token = localStorage.getItem('token');
+      
+      const res = await axios.post(
+        '/api/entries/reconciled-update',
+        { 
+          updates: [{
+            entryId: item.tallyEntry._id,
+            totalAmount: item.portalBill.totalAmount,
+            taxableAmount: item.portalBill.taxableAmount,
+            taxAmount: item.portalBill.taxAmount,
+            date: item.portalBill.date,
+            partyGstin: item.portalBill.partyGstin,
+            partyName: item.portalBill.partyName
+          }] 
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (res.data?.success) {
+        addToast({
+          title: 'Update Success',
+          message: `Successfully updated and queued invoice ${item.portalBill.invoiceNumber} for Tally Sync.`,
+          type: 'success'
+        });
+        
+        fetchEntries();
+      }
+    } catch (err: any) {
+      addToast({
+        title: 'Update Failed',
+        message: err.response?.data?.error || 'Failed to update entry.',
+        type: 'error'
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'success':
@@ -702,7 +745,7 @@ const GST2A = () => {
             className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${
               activeTab === 'all-bills' 
                 ? 'bg-white text-indigo-600 shadow-md' 
-                : 'text-slate-500 hover:text-slate-800'
+                : 'text-slate-505 hover:text-slate-800'
             }`}
           >
             Local Purchase Bills ({filteredEntries.length})
@@ -712,7 +755,7 @@ const GST2A = () => {
             className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${
               activeTab === 'reconciliation' 
                 ? 'bg-white text-indigo-600 shadow-md' 
-                : 'text-slate-500 hover:text-slate-800'
+                : 'text-slate-505 hover:text-slate-800'
             }`}
           >
             Reconciliation Portal {portalBills.length > 0 && `(${reconSummary.unmatched} Missing)`}
@@ -785,7 +828,7 @@ const GST2A = () => {
             ) : filteredEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 text-slate-400 bg-white rounded-3xl border border-slate-200/60">
                 <Search className="h-12 w-12 opacity-20 mb-4" />
-                <p className="font-bold text-lg text-slate-600">No purchase bills found in this period</p>
+                <p className="font-bold text-lg text-slate-650">No purchase bills found in this period</p>
               </div>
             ) : (
               <div className="bg-white rounded-3xl border border-slate-200/60 shadow-xs overflow-hidden">
@@ -830,7 +873,7 @@ const GST2A = () => {
                           <td className="px-6 py-4 text-xs font-bold text-slate-600 font-mono text-right">
                             {e.gstType === 'igst' ? formatCurrency(e.taxAmount || 0) : '-'}
                           </td>
-                          <td className="px-6 py-4 text-sm font-black text-indigo-600 font-mono text-right">{formatCurrency(e.totalAmount || 0)}</td>
+                          <td className="px-6 py-4 text-sm font-black text-indigo-650 font-mono text-right">{formatCurrency(e.totalAmount || 0)}</td>
                           <td className="px-6 py-4 text-center">{getStatusBadge(e.status)}</td>
                         </tr>
                       ))}
@@ -979,7 +1022,7 @@ const GST2A = () => {
                         className="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-750 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center gap-2"
                       >
                         <RefreshCcw className={`w-3.5 h-3.5 ${isImporting ? 'animate-spin' : ''}`} />
-                        Import & Sync ({selectedMissingInvoices.length}) to Tally
+                        Create & Sync Selected ({selectedMissingInvoices.length}) to Tally
                       </button>
                     )}
                   </div>
@@ -1109,21 +1152,28 @@ const GST2A = () => {
                                         </span>
                                       </div>
                                     ) : item.isMismatch ? (
-                                      <div className="space-y-1">
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-100">
-                                          <AlertTriangle className="w-3 h-3" /> Discrepancy
+                                      <div className="flex flex-col items-center gap-1.5">
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-xl text-[9px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-100">
+                                          <AlertTriangle className="w-2.5 h-2.5" /> Discrepancy
                                         </span>
-                                        <div className="text-[9px] font-bold text-rose-500 max-w-[130px] break-words whitespace-normal leading-normal">
+                                        <div className="text-[9px] font-bold text-rose-500 max-w-[140px] text-center mb-1">
                                           {item.matchReason}
                                         </div>
+                                        <button
+                                          onClick={() => handleSingleUpdateAndSync(item)}
+                                          disabled={isImporting}
+                                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                                        >
+                                          <RefreshCcw className="w-2.5 h-2.5" /> Update & Sync to Tally
+                                        </button>
                                       </div>
                                     ) : (
                                       <button
                                         onClick={() => handleSingleImportAndSync(b)}
                                         disabled={isImporting}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider bg-indigo-650 hover:bg-indigo-700 text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider bg-indigo-650 hover:bg-indigo-700 text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                                       >
-                                        <RefreshCcw className={`w-3.5 h-3.5 ${isImporting ? 'animate-spin' : ''}`} /> Sync to Tally
+                                        <RefreshCcw className={`w-3 h-3 ${isImporting ? 'animate-spin' : ''}`} /> Create & Sync to Tally
                                       </button>
                                     )}
                                   </td>

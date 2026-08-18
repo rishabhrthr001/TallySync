@@ -595,6 +595,49 @@ const GST2B = () => {
     }
   };
 
+  // Update existing TallySync entry with GSTR details and sync to Tally
+  const handleSingleUpdateAndSync = async (item: ReconciliationItem) => {
+    if (!item.tallyEntry) return;
+    try {
+      setIsImporting(true);
+      const token = localStorage.getItem('token');
+      
+      const res = await axios.post(
+        '/api/entries/reconciled-update',
+        { 
+          updates: [{
+            entryId: item.tallyEntry._id,
+            totalAmount: item.portalBill.totalAmount,
+            taxableAmount: item.portalBill.taxableAmount,
+            taxAmount: item.portalBill.taxAmount,
+            date: item.portalBill.date,
+            partyGstin: item.portalBill.partyGstin,
+            partyName: item.portalBill.partyName
+          }] 
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (res.data?.success) {
+        addToast({
+          title: 'Update Success',
+          message: `Successfully updated and queued invoice ${item.portalBill.invoiceNumber} for Tally Sync.`,
+          type: 'success'
+        });
+        
+        fetchEntries();
+      }
+    } catch (err: any) {
+      addToast({
+        title: 'Update Failed',
+        message: err.response?.data?.error || 'Failed to update entry.',
+        type: 'error'
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'success':
@@ -748,7 +791,7 @@ const GST2B = () => {
                 <button
                   onClick={handleSync}
                   disabled={isSyncing || isLoading}
-                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-705 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                 >
                   <RefreshCcw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
                   {isSyncing ? 'Syncing...' : 'Sync to Tally'}
@@ -821,16 +864,16 @@ const GST2B = () => {
                             )}
                           </td>
                           <td className="px-6 py-4 text-xs font-black text-slate-850 font-mono text-right">{formatCurrency(e.taxableAmount || 0)}</td>
-                          <td className="px-6 py-4 text-xs font-bold text-slate-600 font-mono text-right">
+                          <td className="px-6 py-4 text-xs font-bold text-slate-650 font-mono text-right">
                             {e.gstType !== 'igst' ? formatCurrency((e.taxAmount || 0) / 2) : '-'}
                           </td>
-                          <td className="px-6 py-4 text-xs font-bold text-slate-600 font-mono text-right">
+                          <td className="px-6 py-4 text-xs font-bold text-slate-650 font-mono text-right">
                             {e.gstType !== 'igst' ? formatCurrency((e.taxAmount || 0) / 2) : '-'}
                           </td>
-                          <td className="px-6 py-4 text-xs font-bold text-slate-600 font-mono text-right">
+                          <td className="px-6 py-4 text-xs font-bold text-slate-650 font-mono text-right">
                             {e.gstType === 'igst' ? formatCurrency(e.taxAmount || 0) : '-'}
                           </td>
-                          <td className="px-6 py-4 text-sm font-black text-teal-605 font-mono text-right">{formatCurrency(e.totalAmount || 0)}</td>
+                          <td className="px-6 py-4 text-sm font-black text-teal-600 font-mono text-right">{formatCurrency(e.totalAmount || 0)}</td>
                           <td className="px-6 py-4 text-center">{getStatusBadge(e.status)}</td>
                         </tr>
                       ))}
@@ -848,7 +891,7 @@ const GST2B = () => {
             <div className="lg:col-span-4 bg-white p-6 rounded-3xl border border-slate-200/60 shadow-xs space-y-6">
               <div>
                 <h3 className="text-lg font-black text-slate-900 tracking-tight">Upload Portal Data</h3>
-                <p className="text-xs font-semibold text-slate-500 mt-0.5">Upload Excel sheet or paste GSTR-2B JSON data</p>
+                <p className="text-xs font-semibold text-slate-505 mt-0.5">Upload Excel sheet or paste GSTR-2B JSON data</p>
               </div>
 
               {/* Excel upload */}
@@ -885,7 +928,7 @@ const GST2B = () => {
                   placeholder='{"b2b": [{"ctin": "...", "inv": [...]}]}'
                   value={jsonInput}
                   onChange={e => setJsonInput(e.target.value)}
-                  className="w-full bg-slate-50 p-4 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 min-h-[160px] outline-none font-mono placeholder-slate-350 focus:border-teal-400 focus:bg-white transition-all resize-none"
+                  className="w-full bg-slate-50 p-4 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-705 min-h-[160px] outline-none font-mono placeholder-slate-350 focus:border-teal-400 focus:bg-white transition-all resize-none"
                 />
                 <button
                   onClick={handleJsonParse}
@@ -917,7 +960,7 @@ const GST2B = () => {
                 <div className="bg-white rounded-3xl border border-slate-200/60 p-12 text-center text-slate-400">
                   <Upload className="h-16 w-16 text-slate-300 mx-auto mb-4" />
                   <h3 className="text-lg font-black text-slate-750">No Portal Data In This Period</h3>
-                  <p className="text-xs font-semibold text-slate-500 mt-1 max-w-sm mx-auto">
+                  <p className="text-xs font-semibold text-slate-505 mt-1 max-w-sm mx-auto">
                     {portalBills.length === 0 
                       ? 'Please paste GSTR JSON data or upload an Excel file on the left panel to begin side-by-side reconciliation.'
                       : 'You have imported portal data, but no records fall within the selected period filter above. Try choosing "All Time".'}
@@ -964,7 +1007,7 @@ const GST2B = () => {
                           key={f.id}
                           onClick={() => setReconFilter(f.id as any)}
                           className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${
-                            reconFilter === f.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'
+                            reconFilter === f.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-505'
                           }`}
                         >
                           {f.label}
@@ -976,10 +1019,10 @@ const GST2B = () => {
                       <button
                         onClick={handleImportAndSync}
                         disabled={selectedMissingInvoices.length === 0 || isImporting}
-                        className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-teal-650 hover:from-teal-650 hover:to-teal-750 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center gap-2"
+                        className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-750 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center gap-2"
                       >
                         <RefreshCcw className={`w-3.5 h-3.5 ${isImporting ? 'animate-spin' : ''}`} />
-                        Import & Sync ({selectedMissingInvoices.length}) to Tally
+                        Create & Sync Selected ({selectedMissingInvoices.length}) to Tally
                       </button>
                     )}
                   </div>
@@ -989,7 +1032,7 @@ const GST2B = () => {
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
-                          <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] font-black uppercase text-slate-550 tracking-wider">
+                          <tr className="bg-slate-100/80 border-b border-slate-200 text-[10px] font-black uppercase text-slate-555 tracking-wider">
                             {reconFilter === 'unmatched' && (
                               <th className="pl-4 py-4 w-10 text-center border-r border-slate-200 bg-slate-100/50">
                                 <button
@@ -1005,10 +1048,10 @@ const GST2B = () => {
                               </th>
                             )}
                             <th className="px-4 py-4 border-r border-slate-200 bg-teal-50/20 text-teal-850" colSpan={3}>GST Portal Invoices</th>
-                            <th className="px-4 py-4 border-r border-slate-200 bg-slate-50 text-slate-800" colSpan={3}>TallySync Database Matches</th>
+                            <th className="px-4 py-4 border-r border-slate-200 bg-slate-50 text-slate-805" colSpan={3}>TallySync Database Matches</th>
                             <th className="px-4 py-4 text-center">Status</th>
                           </tr>
-                          <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-bold text-slate-405 uppercase tracking-wider">
+                          <tr className="bg-slate-55 border-b border-slate-200 text-[9px] font-bold text-slate-405 uppercase tracking-wider">
                             {reconFilter === 'unmatched' && <th className="border-r border-slate-200"></th>}
                             <th className="px-4 py-2">Invoice No / Date</th>
                             <th className="px-4 py-2">Supplier / GSTIN</th>
@@ -1035,11 +1078,11 @@ const GST2B = () => {
                               return (
                                 <tr 
                                   key={b.invoiceNumber} 
-                                  className={`border-b border-slate-100 hover:bg-slate-50/50 transition-colors ${
+                                  className={`border-b border-slate-100 hover:bg-slate-55/50 transition-colors ${
                                     item.isMatched 
                                       ? 'bg-emerald-50/5' 
                                       : item.isMismatch 
-                                      ? 'bg-amber-50/10' 
+                                      ? 'bg-amber-55/10' 
                                       : 'bg-rose-50/10 hover:bg-rose-50/20'
                                   }`}
                                 >
@@ -1067,7 +1110,7 @@ const GST2B = () => {
                                   </td>
                                   <td className="px-4 py-4 bg-teal-50/5">
                                     <div className="font-bold text-slate-800 truncate max-w-[140px]" title={b.partyName}>{b.partyName}</div>
-                                    <div className="text-[10px] font-mono text-slate-500 mt-0.5">{b.partyGstin}</div>
+                                    <div className="text-[10px] font-mono text-slate-505 mt-0.5">{b.partyGstin}</div>
                                   </td>
                                   <td className="px-4 py-4 text-right border-r border-slate-100 font-mono font-black text-slate-800 bg-teal-50/5">
                                     {formatCurrency(b.totalAmount)}
@@ -1078,13 +1121,13 @@ const GST2B = () => {
                                     <>
                                       <td className="px-4 py-4">
                                         <div className="font-bold text-slate-800 leading-tight">{t.invoiceNumber || 'N/A'}</div>
-                                        <div className="text-[10px] font-semibold text-slate-455 mt-0.5">
+                                        <div className="text-[10px] font-semibold text-slate-450 mt-0.5">
                                           {new Date(t.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                                         </div>
                                       </td>
                                       <td className="px-4 py-4">
                                         <div className="font-bold text-slate-855 truncate max-w-[140px]" title={t.partyName}>{t.partyName}</div>
-                                        <div className="text-[10px] font-mono text-slate-500 mt-0.5">{t.partyGstin || 'No GSTIN'}</div>
+                                        <div className="text-[10px] font-mono text-slate-505 mt-0.5">{t.partyGstin || 'No GSTIN'}</div>
                                       </td>
                                       <td className="px-4 py-4 text-right border-r border-slate-100 font-mono font-bold text-slate-700">
                                         {formatCurrency(t.totalAmount)}
@@ -1109,21 +1152,28 @@ const GST2B = () => {
                                         </span>
                                       </div>
                                     ) : item.isMismatch ? (
-                                      <div className="space-y-1">
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-100">
-                                          <AlertTriangle className="w-3 h-3" /> Discrepancy
+                                      <div className="flex flex-col items-center gap-1.5">
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-xl text-[9px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-100">
+                                          <AlertTriangle className="w-2.5 h-2.5" /> Discrepancy
                                         </span>
-                                        <div className="text-[9px] font-bold text-rose-500 max-w-[130px] break-words whitespace-normal leading-normal">
+                                        <div className="text-[9px] font-bold text-rose-505 max-w-[140px] text-center mb-1">
                                           {item.matchReason}
                                         </div>
+                                        <button
+                                          onClick={() => handleSingleUpdateAndSync(item)}
+                                          disabled={isImporting}
+                                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                                        >
+                                          <RefreshCcw className="w-2.5 h-2.5" /> Update & Sync to Tally
+                                        </button>
                                       </div>
                                     ) : (
                                       <button
                                         onClick={() => handleSingleImportAndSync(b)}
                                         disabled={isImporting}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider bg-teal-650 hover:bg-teal-700 text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider bg-teal-650 hover:bg-teal-700 text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                                       >
-                                        <RefreshCcw className={`w-3.5 h-3.5 ${isImporting ? 'animate-spin' : ''}`} /> Sync to Tally
+                                        <RefreshCcw className={`w-3 h-3 ${isImporting ? 'animate-spin' : ''}`} /> Create & Sync to Tally
                                       </button>
                                     )}
                                   </td>
