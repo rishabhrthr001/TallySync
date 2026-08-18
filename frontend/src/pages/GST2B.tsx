@@ -235,18 +235,31 @@ const GST2B = () => {
     if (!jsonInput.trim()) {
       addToast({
         title: 'Input Empty',
-        message: 'Please paste GSTR-2B JSON data first.',
+        message: 'Please paste GSTR JSON data first.',
         type: 'error'
       });
       return;
     }
 
     try {
-      const data = JSON.parse(jsonInput);
+      const data = JSON.parse(jsonInput.trim());
       let extracted: PortalBill[] = [];
 
-      if (data.b2b && Array.isArray(data.b2b)) {
-        data.b2b.forEach((supplier: any) => {
+      // Recursive finder for B2B array
+      const findB2bArray = (obj: any): any[] | null => {
+        if (!obj || typeof obj !== 'object') return null;
+        if (obj.b2b && Array.isArray(obj.b2b)) return obj.b2b;
+        for (const key of Object.keys(obj)) {
+          const found = findB2bArray(obj[key]);
+          if (found) return found;
+        }
+        return null;
+      };
+
+      const b2bArray = findB2bArray(data);
+
+      if (b2bArray && Array.isArray(b2bArray)) {
+        b2bArray.forEach((supplier: any) => {
           const ctin = supplier.ctin || '';
           const name = supplier.tradeName || supplier.lgnm || `Supplier (${ctin})`;
           if (Array.isArray(supplier.inv)) {
@@ -261,10 +274,10 @@ const GST2B = () => {
               let taxAmt = 0;
               if (Array.isArray(inv.itms)) {
                 inv.itms.forEach((itm: any) => {
-                  const det = itm.itm_det;
+                  const det = itm.itm_det || itm;
                   if (det) {
                     txval += Number(det.txval || 0);
-                    taxAmt += Number(det.iamt || 0) + Number(det.camt || 0) + Number(det.samt || 0);
+                    taxAmt += Number(det.iamt || det.igst || 0) + Number(det.camt || det.cgst || 0) + Number(det.samt || det.sgst || 0);
                   }
                 });
               }
@@ -277,7 +290,7 @@ const GST2B = () => {
                 taxableAmount: txval || (Number(inv.val || 0) - taxAmt),
                 taxAmount: taxAmt,
                 totalAmount: Number(inv.val || 0),
-                gstType: taxAmt > 0 && inv.itms?.[0]?.itm_det?.iamt > 0 ? 'igst' : 'cgst-sgst'
+                gstType: taxAmt > 0 && (inv.itms?.[0]?.itm_det?.iamt > 0 || inv.itms?.[0]?.iamt > 0) ? 'igst' : 'cgst-sgst'
               });
             });
           }
@@ -294,7 +307,7 @@ const GST2B = () => {
           gstType: item.gstType || 'cgst-sgst'
         }));
       } else {
-        throw new Error('Unrecognized JSON format. Paste official GSTR b2b data or a flat array.');
+        throw new Error('Unrecognized GSTR JSON structure. Paste official GSTR return data.');
       }
 
       if (extracted.length === 0) {
@@ -529,7 +542,7 @@ const GST2B = () => {
     }
   };
 
-  // Import selected GSTR invoices and Sync to Tally
+  // Import selected GSTR invoices and Sync to Tally (Bulk)
   const handleImportAndSync = async () => {
     if (selectedMissingInvoices.length === 0) return;
     
@@ -537,13 +550,22 @@ const GST2B = () => {
       .filter(i => !i.isMatched && !i.isMismatch && selectedMissingInvoices.includes(i.portalBill.invoiceNumber))
       .map(i => i.portalBill);
 
+    await handleExecutionSync(billsToImport);
+  };
+
+  // Import single GSTR invoice and Sync to Tally
+  const handleSingleImportAndSync = async (bill: PortalBill) => {
+    await handleExecutionSync([bill]);
+  };
+
+  const handleExecutionSync = async (bills: PortalBill[]) => {
     try {
       setIsImporting(true);
       const token = localStorage.getItem('token');
       
       const res = await axios.post(
         '/api/entries/reconciled-bulk',
-        { entries: billsToImport },
+        { entries: bills },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
@@ -680,7 +702,7 @@ const GST2B = () => {
             className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${
               activeTab === 'all-bills' 
                 ? 'bg-white text-teal-600 shadow-md' 
-                : 'text-slate-500 hover:text-slate-800'
+                : 'text-slate-505 hover:text-slate-800'
             }`}
           >
             Local Purchase Bills ({filteredEntries.length})
@@ -690,7 +712,7 @@ const GST2B = () => {
             className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${
               activeTab === 'reconciliation' 
                 ? 'bg-white text-teal-600 shadow-md' 
-                : 'text-slate-500 hover:text-slate-800'
+                : 'text-slate-505 hover:text-slate-800'
             }`}
           >
             Reconciliation Portal {portalBills.length > 0 && `(${reconSummary.unmatched} Missing)`}
@@ -786,7 +808,7 @@ const GST2B = () => {
                     <tbody>
                       {filteredEntries.map(e => (
                         <tr key={e._id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
-                          <td className="px-6 py-4 text-xs font-bold text-slate-650">
+                          <td className="px-6 py-4 text-xs font-bold text-slate-655">
                             {new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </td>
                           <td className="px-6 py-4 text-xs font-black text-slate-900">{e.invoiceNumber || 'N/A'}</td>
@@ -808,7 +830,7 @@ const GST2B = () => {
                           <td className="px-6 py-4 text-xs font-bold text-slate-600 font-mono text-right">
                             {e.gstType === 'igst' ? formatCurrency(e.taxAmount || 0) : '-'}
                           </td>
-                          <td className="px-6 py-4 text-sm font-black text-teal-600 font-mono text-right">{formatCurrency(e.totalAmount || 0)}</td>
+                          <td className="px-6 py-4 text-sm font-black text-teal-605 font-mono text-right">{formatCurrency(e.totalAmount || 0)}</td>
                           <td className="px-6 py-4 text-center">{getStatusBadge(e.status)}</td>
                         </tr>
                       ))}
@@ -954,7 +976,7 @@ const GST2B = () => {
                       <button
                         onClick={handleImportAndSync}
                         disabled={selectedMissingInvoices.length === 0 || isImporting}
-                        className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-750 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center gap-2"
+                        className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-teal-650 hover:from-teal-650 hover:to-teal-750 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center gap-2"
                       >
                         <RefreshCcw className={`w-3.5 h-3.5 ${isImporting ? 'animate-spin' : ''}`} />
                         Import & Sync ({selectedMissingInvoices.length}) to Tally
@@ -1056,12 +1078,12 @@ const GST2B = () => {
                                     <>
                                       <td className="px-4 py-4">
                                         <div className="font-bold text-slate-800 leading-tight">{t.invoiceNumber || 'N/A'}</div>
-                                        <div className="text-[10px] font-semibold text-slate-450 mt-0.5">
+                                        <div className="text-[10px] font-semibold text-slate-455 mt-0.5">
                                           {new Date(t.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                                         </div>
                                       </td>
                                       <td className="px-4 py-4">
-                                        <div className="font-bold text-slate-850 truncate max-w-[140px]" title={t.partyName}>{t.partyName}</div>
+                                        <div className="font-bold text-slate-855 truncate max-w-[140px]" title={t.partyName}>{t.partyName}</div>
                                         <div className="text-[10px] font-mono text-slate-500 mt-0.5">{t.partyGstin || 'No GSTIN'}</div>
                                       </td>
                                       <td className="px-4 py-4 text-right border-r border-slate-100 font-mono font-bold text-slate-700">
@@ -1096,11 +1118,13 @@ const GST2B = () => {
                                         </div>
                                       </div>
                                     ) : (
-                                      <div className="space-y-1">
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-100">
-                                          <AlertCircle className="w-3 h-3" /> Missing
-                                        </span>
-                                      </div>
+                                      <button
+                                        onClick={() => handleSingleImportAndSync(b)}
+                                        disabled={isImporting}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider bg-teal-650 hover:bg-teal-700 text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                                      >
+                                        <RefreshCcw className={`w-3.5 h-3.5 ${isImporting ? 'animate-spin' : ''}`} /> Sync to Tally
+                                      </button>
                                     )}
                                   </td>
                                 </tr>
