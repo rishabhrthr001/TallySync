@@ -11,6 +11,8 @@ import CreateEntry from './pages/CreateEntry';
 import Entries from './pages/Entries';
 import Inventory from './pages/Inventory';
 import Ledgers from './pages/Ledgers';
+import GST2A from './pages/GST2A';
+import GST2B from './pages/GST2B';
 import { ToastProvider } from './contexts/ToastContext';
 import ResetPassword from './pages/ResetPassword';
 
@@ -61,6 +63,8 @@ export default function App() {
             <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
             <Route path="/create-entry" element={<ClientOnlyRoute><CreateEntry /></ClientOnlyRoute>} />
             <Route path="/entries" element={<PrivateRoute><Entries /></PrivateRoute>} />
+            <Route path="/gst-2a" element={<PrivateRoute><GST2A /></PrivateRoute>} />
+            <Route path="/gst-2b" element={<PrivateRoute><GST2B /></PrivateRoute>} />
             <Route path="/inventory" element={<PrivateRoute><Inventory /></PrivateRoute>} />
             <Route path="/ledgers" element={<PrivateRoute><Ledgers /></PrivateRoute>} />
             <Route path="/reports" element={<PrivateRoute><Dashboard /></PrivateRoute>} /> {/* Placeholder */}

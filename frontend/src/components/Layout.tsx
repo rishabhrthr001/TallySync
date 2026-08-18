@@ -16,7 +16,9 @@ import {
   ChevronRight,
   MoreHorizontal,
   Plus,
-  Zap
+  Zap,
+  FileSpreadsheet,
+  ChevronDown
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
@@ -28,6 +30,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showProModal, setShowProModal] = useState(false);
+  const [isGSTExpanded, setIsGSTExpanded] = useState(
+    location.pathname.startsWith('/gst-')
+  );
 
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
@@ -106,6 +111,54 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               </Link>
             );
           })}
+
+          {/* GST Returns Expandable */}
+          {user?.role !== 'admin' && (
+            <div className="mt-1">
+              <button
+                onClick={() => setIsGSTExpanded(!isGSTExpanded)}
+                className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 group ${
+                  location.pathname.startsWith('/gst-')
+                    ? 'text-indigo-600 font-bold bg-indigo-50/40'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-indigo-600'
+                }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <FileSpreadsheet className={`h-5 w-5 transition-colors ${
+                    location.pathname.startsWith('/gst-') ? 'text-indigo-600' : 'text-slate-400 group-hover:text-indigo-500'
+                  }`} />
+                  <span className="text-sm font-medium">GST Returns</span>
+                </div>
+                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${
+                  isGSTExpanded ? 'rotate-180' : ''
+                }`} />
+              </button>
+              {isGSTExpanded && (
+                <div className="ml-6 mt-1 space-y-0.5 border-l-2 border-slate-100 pl-4">
+                  <Link
+                    to="/gst-2a"
+                    className={`block px-3 py-2.5 rounded-lg text-sm transition-all ${
+                      location.pathname === '/gst-2a'
+                        ? 'text-indigo-600 font-bold bg-indigo-50/70'
+                        : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-50 font-medium'
+                    }`}
+                  >
+                    GSTR-2A
+                  </Link>
+                  <Link
+                    to="/gst-2b"
+                    className={`block px-3 py-2.5 rounded-lg text-sm transition-all ${
+                      location.pathname === '/gst-2b'
+                        ? 'text-teal-600 font-bold bg-teal-50/70'
+                        : 'text-slate-500 hover:text-teal-600 hover:bg-slate-50 font-medium'
+                    }`}
+                  >
+                    GSTR-2B
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
         </nav>
 
         <div className="p-4 border-t border-slate-100/80 bg-white/40 shrink-0">
@@ -283,6 +336,42 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                     </Link>
                   );
                 })}
+
+                {user?.role !== 'admin' && (
+                  <>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4">GST Returns</p>
+                    <Link
+                      to="/gst-2a"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`flex items-center justify-between px-4 py-3.5 rounded-xl transition-all ${
+                        location.pathname === '/gst-2a'
+                          ? 'bg-indigo-50 text-indigo-700 font-bold'
+                          : 'text-slate-600 active:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <FileSpreadsheet className={`h-5 w-5 ${location.pathname === '/gst-2a' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                        <span className="text-sm font-semibold">GSTR-2A</span>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </Link>
+                    <Link
+                      to="/gst-2b"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`flex items-center justify-between px-4 py-3.5 rounded-xl transition-all ${
+                        location.pathname === '/gst-2b'
+                          ? 'bg-teal-50 text-teal-700 font-bold'
+                          : 'text-slate-600 active:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <FileSpreadsheet className={`h-5 w-5 ${location.pathname === '/gst-2b' ? 'text-teal-600' : 'text-slate-400'}`} />
+                        <span className="text-sm font-semibold">GSTR-2B</span>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </Link>
+                  </>
+                )}
               </div>
 
               <div className="mt-6 pt-4 border-t border-slate-100 space-y-3">

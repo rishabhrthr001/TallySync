@@ -741,4 +741,40 @@ router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, re
   }
 });
 
+// Bulk retry entries for Tally sync (used by GST 2A/2B pages)
+router.post('/bulk-retry', authenticateToken, async (req: any, res) => {
+  const { entryIds, withItems } = req.body;
+  
+  if (!Array.isArray(entryIds) || entryIds.length === 0) {
+    return res.status(400).json({ error: 'No entry IDs provided' });
+  }
+
+  try {
+    let query: any = { _id: { $in: entryIds } };
+    if (req.user.role !== 'admin') {
+      query.companyName = req.user.companyName;
+    }
+
+    const updateFields: any = { 
+      status: 'pending', 
+      syncError: '' 
+    };
+
+    // If withItems is explicitly false, clear items so agent uses accounting voucher mode
+    if (withItems === false) {
+      updateFields.items = [];
+    }
+
+    const result = await Entry.updateMany(query, { $set: updateFields });
+
+    res.json({ 
+      success: true, 
+      modifiedCount: result.modifiedCount,
+      message: `${result.modifiedCount} entries re-queued for Tally sync${withItems === false ? ' (without items)' : ' (with items)'}` 
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
