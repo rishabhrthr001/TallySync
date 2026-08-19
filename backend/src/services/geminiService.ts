@@ -163,7 +163,7 @@ export async function matchProductWithInventoryCatalog(
   inventoryCatalog: Array<{ _id: string; name: string; category?: string; sku?: string; rate?: number }>
 ): Promise<InventoryMatchingResult> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
 
     // Parse base64 string to inlineData structure
     const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
@@ -241,7 +241,7 @@ Return the extracted product details and any matched inventory items strictly fo
  */
 export async function extractProductDetails(base64Image: string): Promise<ExtractedProductInfo> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
 
     // Parse base64 string to inlineData structure
     const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
@@ -417,7 +417,7 @@ Important Rules:
   };
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }, docPart] }],
       generationConfig: {
@@ -434,7 +434,7 @@ Important Rules:
   } catch (error: any) {
     console.warn('Fast flash model failed, trying fallback...', error.message || error);
     try {
-      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
       const fallbackResult = await fallbackModel.generateContent({
         contents: [{ role: 'user', parts: [{ text: prompt }, docPart] }],
         generationConfig: { responseMimeType: 'application/json' }
@@ -574,7 +574,7 @@ STEP 2: EXTRACT EVERY TRANSACTION
 Return strictly valid JSON following the schema.`;
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
 
     let contentsParts: any[] = [];
     if (extractedText.length > 100) {
@@ -605,8 +605,8 @@ Return strictly valid JSON following the schema.`;
   } catch (error: any) {
     console.error('Gemini bank statement extraction error:', error.message || error);
     try {
-      console.log('Retrying bank statement extraction with gemini-1.5-flash fallback...');
-      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      console.log('Retrying bank statement extraction with gemini-3.1-flash-lite fallback...');
+      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
       
       let fallbackParts: any[] = [];
       if (extractedText.length > 100) {

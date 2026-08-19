@@ -26,9 +26,9 @@ const productExtractionSchema = {
 
 async function test() {
     try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
         
-        console.log('Sending structured request to gemini-1.5-flash...');
+        console.log('Sending structured request to gemini-3.6-flash...');
         const result = await model.generateContent({
             contents: [{ role: 'user', parts: [{ text: 'Identify the product: "Apple iPhone 14 Pro Max 256GB Space Gray"' }] }],
             generationConfig: {
