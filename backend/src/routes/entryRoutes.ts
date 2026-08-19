@@ -524,7 +524,9 @@ async function decryptPdf(buffer: Buffer, password?: string): Promise<Buffer> {
 
     // Strategy 1: qpdf (Gold standard: supports RC4, AES-128, AES-256 encrypted bank PDFs)
     try {
-      const qpdfCmd = `qpdf --password="${escapedPassword}" --decrypt "${inputPath}" "${outputPath}"`;
+      const customQpdfPath = path.join(process.cwd(), 'bin', 'qpdf-12.4.0-msvc64', 'bin', 'qpdf.exe');
+      const qpdfExe = fs.existsSync(customQpdfPath) ? `"${customQpdfPath}"` : 'qpdf';
+      const qpdfCmd = `${qpdfExe} --password="${escapedPassword}" --decrypt "${inputPath}" "${outputPath}"`;
       try {
         await execPromise(qpdfCmd);
       } catch (qpdfErr: any) {
@@ -606,6 +608,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
     }
 
     const password = req.body.password ? req.body.password.trim() : '';
+    const selectedBank = req.body.selectedBank ? req.body.selectedBank.trim() : '';
     let fileBuffer = req.file.buffer;
 
     if (password && (finalMime === 'application/pdf' || /\.pdf$/i.test(req.file.originalname))) {
@@ -620,7 +623,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
     // Call gemini service to extract transactions
     let data;
     try {
-      data = await extractBankStatementDetails(fileBuffer, finalMime);
+      data = await extractBankStatementDetails(fileBuffer, finalMime, selectedBank);
     } catch (parseErr: any) {
       console.error('[Bank Statement Upload] Extraction error:', parseErr);
       const errStr = (parseErr.message || '').toLowerCase();
