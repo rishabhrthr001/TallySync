@@ -42,6 +42,7 @@ const Dashboard: React.FC = () => {
   const [bankPassword, setBankPassword] = useState<string>('');
   const [showBankPassword, setShowBankPassword] = useState<boolean>(false);
   const [showProModal, setShowProModal] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
   const updateTempTxn = (index: number, field: string, value: any) => {
     setTempTransactions(prev => prev.map((t, idx) => idx === index ? { ...t, [field]: value } : t));
@@ -123,6 +124,7 @@ const Dashboard: React.FC = () => {
       setTempTransactions([]);
       setTargetBankLedger('');
       setBankPassword('');
+      setShowDetails(false);
       fetchData();
     } catch (err: any) {
       console.error(err);
@@ -981,106 +983,117 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
                   
+                  {/* Toggle list details optionally */}
+                  <button
+                    type="button"
+                    onClick={() => setShowDetails(!showDetails)}
+                    className="w-full py-2.5 bg-slate-100/80 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {showDetails ? 'Hide Transaction Details' : `Show Transaction Details (${tempTransactions.length} items)`}
+                  </button>
+
                   {/* Preview list */}
-                  <div className="max-h-80 overflow-y-auto space-y-3 pr-1.5">
-                    {tempTransactions.map((txn: any, idx: number) => (
-                      <div key={idx} className="relative p-3.5 bg-slate-50 hover:bg-white rounded-2xl border border-slate-200/80 hover:border-indigo-200 transition-all shadow-xs space-y-3">
-                        <button
-                          type="button"
-                          onClick={() => removeTempTxn(idx)}
-                          className="absolute top-2.5 right-2.5 text-slate-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
-                          title="Exclude transaction"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                  {showDetails && (
+                    <div className="max-h-80 overflow-y-auto space-y-3 pr-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
+                      {tempTransactions.map((txn: any, idx: number) => (
+                        <div key={idx} className="relative p-3.5 bg-slate-50 hover:bg-white rounded-2xl border border-slate-200/80 hover:border-indigo-200 transition-all shadow-xs space-y-3">
+                          <button
+                            type="button"
+                            onClick={() => removeTempTxn(idx)}
+                            className="absolute top-2.5 right-2.5 text-slate-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
+                            title="Exclude transaction"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
 
-                        {/* Top metadata row */}
-                        <div className="grid grid-cols-2 gap-2.5 pr-6">
-                          <div>
-                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Date</label>
-                            <input 
-                              type="date"
-                              value={txn.date}
-                              onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Type</label>
-                            <select
-                              value={txn.type}
-                              onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400 uppercase"
-                            >
-                              <option value="payment">Payment (Money Out)</option>
-                              <option value="receipt">Receipt (Money In)</option>
-                              <option value="contra">Contra (Bank/Cash Transfer)</option>
-                              <option value="journal">Journal</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        {/* Party name input & Bank ledger */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <div>
-                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Party / Counter Ledger</label>
-                            <input 
-                              type="text"
-                              value={txn.partyName}
-                              onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Bank Ledger</label>
-                            <input 
-                              type="text"
-                              value={txn.bankLedger || targetBankLedger}
-                              onChange={(e) => updateTempTxn(idx, 'bankLedger', e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-indigo-700 outline-none focus:border-indigo-400"
-                            />
-                          </div>
-                        </div>
-
-                        {/* Amount & Notes */}
-                        <div className="grid grid-cols-3 gap-2.5 items-end">
-                          <div className="col-span-1">
-                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Amount (₹)</label>
-                            <input 
-                              type="number"
-                              value={txn.totalAmount}
-                              onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400 font-mono"
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Narration / Description</label>
-                            <input 
-                              type="text"
-                              value={txn.notes}
-                              onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
-                              placeholder="Transaction details..."
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 outline-none focus:border-indigo-400"
-                            />
-                          </div>
-                        </div>
-
-                        {/* Quality score bar */}
-                        {txn.confidence !== undefined && (
-                          <div className="flex items-center gap-2 pt-1 border-t border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                            <span>Confidence:</span>
-                            <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                              <div 
-                                className={`h-full rounded-full ${txn.confidence > 0.8 ? 'bg-emerald-500' : txn.confidence > 0.5 ? 'bg-amber-500' : 'bg-rose-500'}`} 
-                                style={{ width: `${txn.confidence * 100}%` }}
+                          {/* Top metadata row */}
+                          <div className="grid grid-cols-2 gap-2.5 pr-6">
+                            <div>
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Date</label>
+                              <input 
+                                type="date"
+                                value={txn.date}
+                                onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400"
                               />
                             </div>
-                            <span>{(txn.confidence * 100).toFixed(0)}%</span>
+                            <div>
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Type</label>
+                              <select
+                                value={txn.type}
+                                onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400 uppercase"
+                              >
+                                <option value="payment">Payment (Money Out)</option>
+                                <option value="receipt">Receipt (Money In)</option>
+                                <option value="contra">Contra (Bank/Cash Transfer)</option>
+                                <option value="journal">Journal</option>
+                              </select>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+
+                          {/* Party name input & Bank ledger */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Party / Counter Ledger</label>
+                              <input 
+                                type="text"
+                                value={txn.partyName}
+                                onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Bank Ledger</label>
+                              <input 
+                                type="text"
+                                value={txn.bankLedger || targetBankLedger}
+                                onChange={(e) => updateTempTxn(idx, 'bankLedger', e.target.value)}
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-indigo-700 outline-none focus:border-indigo-400"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Amount & Notes */}
+                          <div className="grid grid-cols-3 gap-2.5 items-end">
+                            <div className="col-span-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Amount (₹)</label>
+                              <input 
+                                type="number"
+                                value={txn.totalAmount}
+                                onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400 font-mono"
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Narration / Description</label>
+                              <input 
+                                type="text"
+                                value={txn.notes}
+                                onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
+                                placeholder="Transaction details..."
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 outline-none focus:border-indigo-400"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Quality score bar */}
+                          {txn.confidence !== undefined && (
+                            <div className="flex items-center gap-2 pt-1 border-t border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                              <span>Confidence:</span>
+                              <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full rounded-full ${txn.confidence > 0.8 ? 'bg-emerald-500' : txn.confidence > 0.5 ? 'bg-amber-500' : 'bg-rose-500'}`} 
+                                  style={{ width: `${txn.confidence * 100}%` }}
+                                />
+                              </div>
+                              <span>{(txn.confidence * 100).toFixed(0)}%</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Submit / Cancel Actions */}
                   <div className="flex gap-3 pt-2">
