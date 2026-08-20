@@ -272,7 +272,7 @@ const Dashboard: React.FC = () => {
     if (isBankModalOpen) {
       const loadLedgers = async () => {
         try {
-          const res = await axios.get('/api/ledgers', {
+          const res = await axios.get('/api/ledger', {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
           });
           setTallyLedgers(res.data || []);
