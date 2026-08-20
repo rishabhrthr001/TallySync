@@ -1008,8 +1008,14 @@ const Dashboard: React.FC = () => {
                       <p className="text-sm font-bold text-slate-800">{bankParseResult.accountNumber || 'N/A'}</p>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                      <p className="text-[10px] font-black text-slate-500 uppercase">Name</p>
-                      <p className="text-sm font-bold text-slate-800">{targetBankLedger || 'Bank Account'}</p>
+                      <p className="text-[10px] font-black text-slate-500 uppercase">Bank Name</p>
+                      <input
+                        type="text"
+                        value={targetBankLedger || ''}
+                        onChange={(e) => setTargetBankLedger(e.target.value)}
+                        className="text-sm font-bold text-slate-800 bg-transparent border-b border-dashed border-slate-300 focus:border-indigo-500 outline-none w-full py-0.5"
+                        placeholder="Bank Account"
+                      />
                     </div>
                   </div>
 

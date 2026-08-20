@@ -635,6 +635,15 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
     const rawTransactions = data.transactions || [];
     const detectedBank = (data.bankName || 'Bank Account').trim();
 
+    // Robustly convert any value to a clean number (handles commas, strings, undefined, etc.)
+    const sanitizeNumber = (val: any): number => {
+      if (val == null) return 0;
+      if (typeof val === 'number') return isNaN(val) ? 0 : val;
+      const cleaned = String(val).replace(/,/g, '').replace(/[^\d.\-]/g, '').trim();
+      const num = parseFloat(cleaned);
+      return isNaN(num) ? 0 : num;
+    };
+
     const formattedTransactions = rawTransactions.map((txn: any) => {
       const lowercaseType = (txn.voucherType || 'Payment').toLowerCase();
       let party = txn.partyName || '';
@@ -652,7 +661,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
         type: lowercaseType,
         partyName: party,
         invoiceNumber: txn.referenceNumber || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`,
-        totalAmount: txn.amount,
+        totalAmount: sanitizeNumber(txn.amount),
         notes: txn.narration || '',
         confidence: txn.confidence || 1.0,
         reason: txn.reason || '',
@@ -666,8 +675,8 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
       bankName: detectedBank,
       accountNumber: data.accountNumber || '',
       ifsc: data.ifsc || '',
-      openingBalance: data.openingBalance || 0,
-      closingBalance: data.closingBalance || 0,
+      openingBalance: sanitizeNumber(data.openingBalance),
+      closingBalance: sanitizeNumber(data.closingBalance),
       statementPeriod: data.statementPeriod || null,
       data: formattedTransactions 
     });
