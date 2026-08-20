@@ -286,26 +286,31 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     if (tallyLedgers.length > 0 && tempTransactions.length > 0) {
-      // Auto-map based on exact or fuzzy match; otherwise default to Suspense
       setTempTransactions(prev => prev.map(t => {
-        if (t.partyName && t.partyName !== 'Suspense') {
+        const currentName = (t.partyName || t.notes || '').toLowerCase().trim();
+        
+        if (currentName === 'suspense') {
           return t;
         }
-        const targetName = (t.partyName || t.notes || '').toLowerCase().trim();
-        
-        // Exact case-insensitive match
-        const exactMatch = tallyLedgers.find(l => l.partyName.toLowerCase().trim() === targetName);
+
+        // Try exact case-insensitive match
+        const exactMatch = tallyLedgers.find(l => l.partyName.toLowerCase().trim() === currentName);
         if (exactMatch) {
           return { ...t, partyName: exactMatch.partyName };
         }
 
-        // Fuzzy match: check if ledger name is part of statement text or vice versa
+        // Try fuzzy match: check if ledger name is part of statement text or vice versa
         const fuzzyMatch = tallyLedgers.find(l => {
           const lName = l.partyName.toLowerCase().trim();
-          return targetName.includes(lName) || lName.includes(targetName);
+          return currentName.includes(lName) || lName.includes(currentName);
         });
 
-        return { ...t, partyName: fuzzyMatch ? fuzzyMatch.partyName : 'Suspense' };
+        if (fuzzyMatch) {
+          return { ...t, partyName: fuzzyMatch.partyName };
+        }
+
+        // Default to Suspense if no exact or fuzzy match exists
+        return { ...t, partyName: 'Suspense' };
       }));
     }
   }, [tallyLedgers]);
