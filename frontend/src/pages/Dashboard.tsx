@@ -732,8 +732,45 @@ const Dashboard: React.FC = () => {
             <p className="text-slate-400 text-xs font-semibold mt-0.5">Quickly filter, reprint, and verify print statuses</p>
           </div>
           
-          {/* Quick Filters */}
-          <div className="flex bg-slate-100/80 p-1.5 rounded-2xl gap-1 self-start md:self-auto">
+          <div className="flex flex-wrap items-center gap-3">
+            {selectionMode ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSelectAllEntries}
+                  className="px-3.5 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all cursor-pointer"
+                >
+                  {getFilteredRecentEntries().map((e: any) => e._id).every(id => selectedEntries.includes(id)) ? "Deselect All" : "Select All"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearSelectedEntries}
+                  className="px-3.5 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete Selected ({selectedEntries.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectionMode(false);
+                    setSelectedEntries([]);
+                  }}
+                  className="px-3 py-2 text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSelectionMode(true)}
+                className="px-3.5 py-2 text-xs font-bold border border-slate-250 hover:bg-slate-50 text-slate-600 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Clear Entries
+              </button>
+            )} <div className="flex bg-slate-100/80 p-1.5 rounded-2xl gap-1 self-start md:self-auto">
             {(['all', 'today', 'yesterday', 'week'] as const).map((filter) => (
               <button
                 key={filter}
@@ -748,6 +785,7 @@ const Dashboard: React.FC = () => {
               </button>
             ))}
           </div>
+          </div>
         </div>
 
         {/* List of recent bills */}
@@ -761,9 +799,21 @@ const Dashboard: React.FC = () => {
             getFilteredRecentEntries().slice(0, 10).map((e: any) => (
               <div 
                 key={e._id} 
-                className="flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-slate-50/30 hover:bg-indigo-50/10 rounded-2xl border border-slate-200/50 hover:border-indigo-200/60 transition-all duration-200 gap-4"
+                className={`flex flex-col sm:flex-row sm:items-center justify-between p-5 rounded-2xl border transition-all duration-200 gap-4 ${
+                  selectedEntries.includes(e._id) 
+                    ? "bg-indigo-50/20 border-indigo-250 hover:border-indigo-300" 
+                    : "bg-slate-50/30 hover:bg-indigo-50/10 border-slate-200/50 hover:border-indigo-200/60"
+                }`}
               >
                 <div className="flex items-center gap-4.5 min-w-0">
+                  {selectionMode && (
+                    <input 
+                      type="checkbox"
+                      checked={selectedEntries.includes(e._id)}
+                      onChange={() => handleSelectEntry(e._id)}
+                      className="h-4.5 w-4.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer mr-2"
+                    />
+                  )}
                   <div className={`p-3 rounded-2xl shrink-0 ${
                     e.type === 'sales' ? 'bg-indigo-50 text-indigo-650' : 
                     e.type === 'purchase' ? 'bg-amber-50 text-amber-650' :
