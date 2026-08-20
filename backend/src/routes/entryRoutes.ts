@@ -524,9 +524,7 @@ async function decryptPdf(buffer: Buffer, password?: string): Promise<Buffer> {
 
     // Strategy 1: qpdf (Gold standard: supports RC4, AES-128, AES-256 encrypted bank PDFs)
     try {
-      const customQpdfPath = path.join(process.cwd(), 'bin', 'qpdf-12.4.0-msvc64', 'bin', 'qpdf.exe');
-      const qpdfExe = fs.existsSync(customQpdfPath) ? `"${customQpdfPath}"` : 'qpdf';
-      const qpdfCmd = `${qpdfExe} --password="${escapedPassword}" --decrypt "${inputPath}" "${outputPath}"`;
+      const qpdfCmd = `qpdf --password="${escapedPassword}" --decrypt "${inputPath}" "${outputPath}"`;
       try {
         await execPromise(qpdfCmd);
       } catch (qpdfErr: any) {
@@ -608,7 +606,6 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
     }
 
     const password = req.body.password ? req.body.password.trim() : '';
-    const selectedBank = req.body.selectedBank ? req.body.selectedBank.trim() : '';
     let fileBuffer = req.file.buffer;
 
     if (password && (finalMime === 'application/pdf' || /\.pdf$/i.test(req.file.originalname))) {
@@ -623,7 +620,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
     // Call gemini service to extract transactions
     let data;
     try {
-      data = await extractBankStatementDetails(fileBuffer, finalMime, selectedBank);
+      data = await extractBankStatementDetails(fileBuffer, finalMime);
     } catch (parseErr: any) {
       console.error('[Bank Statement Upload] Extraction error:', parseErr);
       const errStr = (parseErr.message || '').toLowerCase();
@@ -634,15 +631,6 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
     }
     const rawTransactions = data.transactions || [];
     const detectedBank = (data.bankName || 'Bank Account').trim();
-
-    // Robustly convert any value to a clean number (handles commas, strings, undefined, etc.)
-    const sanitizeNumber = (val: any): number => {
-      if (val == null) return 0;
-      if (typeof val === 'number') return isNaN(val) ? 0 : val;
-      const cleaned = String(val).replace(/,/g, '').replace(/[^\d.\-]/g, '').trim();
-      const num = parseFloat(cleaned);
-      return isNaN(num) ? 0 : num;
-    };
 
     const formattedTransactions = rawTransactions.map((txn: any) => {
       const lowercaseType = (txn.voucherType || 'Payment').toLowerCase();
@@ -661,7 +649,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
         type: lowercaseType,
         partyName: party,
         invoiceNumber: txn.referenceNumber || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`,
-        totalAmount: sanitizeNumber(txn.amount),
+        totalAmount: txn.amount,
         notes: txn.narration || '',
         confidence: txn.confidence || 1.0,
         reason: txn.reason || '',
@@ -675,8 +663,8 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
       bankName: detectedBank,
       accountNumber: data.accountNumber || '',
       ifsc: data.ifsc || '',
-      openingBalance: sanitizeNumber(data.openingBalance),
-      closingBalance: sanitizeNumber(data.closingBalance),
+      openingBalance: data.openingBalance || 0,
+      closingBalance: data.closingBalance || 0,
       statementPeriod: data.statementPeriod || null,
       data: formattedTransactions 
     });

@@ -59,9 +59,7 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   try {
     await fs.promises.writeFile(inputPath, buffer);
     // pdftotext -layout preserves columns and tabular structure for bank statements
-    const customPdftotextPath = path.join(process.cwd(), 'bin', 'poppler', 'poppler-26.02.0', 'Library', 'bin', 'pdftotext.exe');
-    const pdftotextExe = fs.existsSync(customPdftotextPath) ? `"${customPdftotextPath}"` : 'pdftotext';
-    const cmd = `${pdftotextExe} -layout "${inputPath}" "${outputPath}"`;
+    const cmd = `pdftotext -layout "${inputPath}" "${outputPath}"`;
     await execPromise(cmd);
     if (fs.existsSync(outputPath)) {
       const text = await fs.promises.readFile(outputPath, 'utf-8');
@@ -532,7 +530,7 @@ export interface ExtractedBankStatementInfo {
 /**
  * Extracts structured transaction details from a bank statement PDF/image using Gemini.
  */
-export async function extractBankStatementDetails(buffer: Buffer, mimeType: string, selectedBank?: string): Promise<ExtractedBankStatementInfo> {
+export async function extractBankStatementDetails(buffer: Buffer, mimeType: string): Promise<ExtractedBankStatementInfo> {
   const isPdf = mimeType === 'application/pdf' || mimeType.includes('pdf');
   let extractedText = '';
   if (isPdf) {
@@ -544,13 +542,8 @@ export async function extractBankStatementDetails(buffer: Buffer, mimeType: stri
     }
   }
 
-  let bankHint = '';
-  if (selectedBank) {
-    bankHint = `\nThe user has explicitly stated this is a statement from **${selectedBank}**. Use this as the exact Bank Name unless contradicted.`;
-  }
-
   const baseInstructions = `You are an expert accountant with deep knowledge of Tally Prime, Indian banking systems, and bank statement reconciliation.
-Analyze this bank statement and convert it into structured banking data for Tally accounting.${bankHint}
+Analyze this bank statement and convert it into structured banking data for Tally accounting.
 
 STEP 1: IDENTIFY THE BANK & ACCOUNT
 - Identify the exact BANK NAME from the header, logo, or branch details (e.g., "ICICI Bank", "HDFC Bank", "State Bank of India", "Axis Bank", "Kotak Mahindra Bank", "Bank of Baroda", "Punjab National Bank", "Canara Bank", "IndusInd Bank", "Federal Bank").

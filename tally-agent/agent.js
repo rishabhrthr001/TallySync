@@ -615,11 +615,6 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
     else if (entry.type === 'contra') voucherType = 'Contra';
     else if (entry.type === 'journal') voucherType = 'Journal';
 
-    // Cash transactions must always be Contra in Tally
-    if ((partyLedger || '').toLowerCase().includes('cash')) {
-        voucherType = 'Contra';
-    }
-
     // For journal entries, we don't use bank view — keep the old accounting style
     if (entry.type === 'journal') {
         const body = `
@@ -637,46 +632,22 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
         return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth, entry.tallyGuid);
     }
 
+    // --- Bank Voucher (Payment / Receipt / Contra) ---
+    // Uses ALLLEDGERENTRIES.LIST + BANKALLOCATIONS.LIST so transactions
+    // appear inside the bank ledger's register/statement in Tally Prime.
+    //
+    // Sign rules for bank entry:
+    //   Payment → Bank is CREDITED (ISDEEMEDPOSITIVE=No, amount positive)
+    //   Receipt → Bank is DEBITED  (ISDEEMEDPOSITIVE=Yes, amount negative)
+    //   Contra  → Source bank CREDITED, Destination bank DEBITED
+
     const refNum = entry.invoiceNumber || '';
     const narration = entry.notes || '';
 
     let bankEntryXml, partyEntryXml;
 
-    const partyIsCash = (partyLedger || '').toLowerCase().includes('cash');
-    const bankIsCash = (bankLedger || '').toLowerCase().includes('cash');
-
-    if (voucherType === 'Contra') {
-        // Contra: Cash-to-Bank or Bank-to-Bank
-        // No BANKALLOCATIONS.LIST on Cash ledgers — Tally crashes otherwise
-        partyEntryXml = `
-                        <ALLLEDGERENTRIES.LIST>
-                            <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
-                            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>${!partyIsCash ? `
-                            <BANKALLOCATIONS.LIST>
-                                <DATE>${dateStr}</DATE>
-                                <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
-                                <INSTRUMENTNUMBER>${escapeXML(refNum)}</INSTRUMENTNUMBER>
-                                <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
-                                <PAYMENTMODE>Transacted</PAYMENTMODE>
-                                <AMOUNT>${amount.toFixed(2)}</AMOUNT>
-                            </BANKALLOCATIONS.LIST>` : ''}
-                        </ALLLEDGERENTRIES.LIST>`;
-        bankEntryXml = `
-                        <ALLLEDGERENTRIES.LIST>
-                            <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
-                            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>${!bankIsCash ? `
-                            <BANKALLOCATIONS.LIST>
-                                <DATE>${dateStr}</DATE>
-                                <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
-                                <INSTRUMENTNUMBER>${escapeXML(refNum)}</INSTRUMENTNUMBER>
-                                <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
-                                <PAYMENTMODE>Transacted</PAYMENTMODE>
-                                <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
-                            </BANKALLOCATIONS.LIST>` : ''}
-                        </ALLLEDGERENTRIES.LIST>`;
-    } else if (voucherType === 'Payment') {
+    if (entry.type === 'payment') {
+        // Bank ledger: Credit (money going out)
         bankEntryXml = `
                         <ALLLEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
@@ -692,14 +663,15 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                                 <AMOUNT>${amount.toFixed(2)}</AMOUNT>
                             </BANKALLOCATIONS.LIST>
                         </ALLLEDGERENTRIES.LIST>`;
+        // Party/Expense ledger: Debit (receiving the payment)
         partyEntryXml = `
                         <ALLLEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
                             <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
                         </ALLLEDGERENTRIES.LIST>`;
-    } else {
-        // Receipt
+    } else if (entry.type === 'receipt') {
+        // Bank ledger: Debit (money coming in)
         bankEntryXml = `
                         <ALLLEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
@@ -715,17 +687,48 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                                 <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
                             </BANKALLOCATIONS.LIST>
                         </ALLLEDGERENTRIES.LIST>`;
+        // Party/Income ledger: Credit (paying us)
         partyEntryXml = `
                         <ALLLEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
                             <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                        </ALLLEDGERENTRIES.LIST>`;
+    } else { // contra
+        // Source (partyLedger — often cash or another bank): Credit
+        partyEntryXml = `
+                        <ALLLEDGERENTRIES.LIST>
+                            <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                            <BANKALLOCATIONS.LIST>
+                                <DATE>${dateStr}</DATE>
+                                <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
+                                <INSTRUMENTNUMBER>${escapeXML(refNum)}</INSTRUMENTNUMBER>
+                                <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
+                                <PAYMENTMODE>Transacted</PAYMENTMODE>
+                                <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                            </BANKALLOCATIONS.LIST>
+                        </ALLLEDGERENTRIES.LIST>`;
+        // Destination (bankLedger): Debit
+        bankEntryXml = `
+                        <ALLLEDGERENTRIES.LIST>
+                            <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
+                            <BANKALLOCATIONS.LIST>
+                                <DATE>${dateStr}</DATE>
+                                <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
+                                <INSTRUMENTNUMBER>${escapeXML(refNum)}</INSTRUMENTNUMBER>
+                                <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
+                                <PAYMENTMODE>Transacted</PAYMENTMODE>
+                                <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
+                            </BANKALLOCATIONS.LIST>
                         </ALLLEDGERENTRIES.LIST>`;
     }
 
-    // No PARTYLEDGERNAME for Contra vouchers
-    const body = `${voucherType !== 'Contra' ? `
-                        <PARTYLEDGERNAME>${escapeXML(bankLedger)}</PARTYLEDGERNAME>` : ''}
+    const body = `
+                        <PARTYLEDGERNAME>${escapeXML(bankLedger)}</PARTYLEDGERNAME>
                         ${bankEntryXml}
                         ${partyEntryXml}`;
 
@@ -840,14 +843,15 @@ async function syncEntry(entry) {
             }
 
             let partyGroup = 'Sundry Creditors'; // default for payment
-            if (partyName.toLowerCase().includes('cash')) {
-                partyGroup = 'Cash-in-hand';
-            } else if (entry.type === 'receipt') {
+            if (entry.type === 'receipt') {
                 partyGroup = 'Sundry Debtors';
             } else if (entry.type === 'contra') {
-                partyGroup = 'Bank Accounts';
+                partyGroup = 'Bank Accounts'; // Contra is bank-to-bank or cash-to-bank
+                if (partyName.toLowerCase().includes('cash')) {
+                    partyGroup = 'Cash-in-hand';
+                }
             } else if (entry.type === 'journal') {
-                partyGroup = 'Indirect Expenses';
+                partyGroup = 'Indirect Expenses'; // default for journal charges
             }
 
             ledgersNeeded.push({ name: bankName, group: bankGroup });
