@@ -695,12 +695,20 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                             <AMOUNT>${amount.toFixed(2)}</AMOUNT>
                         </ALLLEDGERENTRIES.LIST>`;
     } else { // contra
-        // Source (partyLedger — often cash or another bank): Credit
+        // For Contra: Cash ledgers MUST NOT have BANKALLOCATIONS.LIST
+        // Only actual Bank Account ledgers get BANKALLOCATIONS.LIST
+        const partyIsCash = (partyLedger || '').toLowerCase() === 'cash' ||
+                            (partyLedger || '').toLowerCase().startsWith('cash ') ||
+                            (partyLedger || '').toLowerCase().includes(' cash');
+        const bankIsCash  = (bankLedger || '').toLowerCase() === 'cash'  ||
+                            (bankLedger || '').toLowerCase().startsWith('cash ') ||
+                            (bankLedger || '').toLowerCase().includes(' cash');
+
         partyEntryXml = `
                         <ALLLEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>${!partyIsCash ? `
                             <BANKALLOCATIONS.LIST>
                                 <DATE>${dateStr}</DATE>
                                 <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
@@ -708,14 +716,14 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                                 <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
                                 <PAYMENTMODE>Transacted</PAYMENTMODE>
                                 <AMOUNT>${amount.toFixed(2)}</AMOUNT>
-                            </BANKALLOCATIONS.LIST>
+                            </BANKALLOCATIONS.LIST>` : ''}
                         </ALLLEDGERENTRIES.LIST>`;
-        // Destination (bankLedger): Debit
+
         bankEntryXml = `
                         <ALLLEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
+                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>${!bankIsCash ? `
                             <BANKALLOCATIONS.LIST>
                                 <DATE>${dateStr}</DATE>
                                 <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
@@ -723,12 +731,13 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                                 <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
                                 <PAYMENTMODE>Transacted</PAYMENTMODE>
                                 <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
-                            </BANKALLOCATIONS.LIST>
+                            </BANKALLOCATIONS.LIST>` : ''}
                         </ALLLEDGERENTRIES.LIST>`;
     }
 
-    const body = `
-                        <PARTYLEDGERNAME>${escapeXML(bankLedger)}</PARTYLEDGERNAME>
+    // Contra vouchers in Tally must NOT have <PARTYLEDGERNAME> — it causes memory crash
+    const body = `${voucherType !== 'Contra' ? `
+                        <PARTYLEDGERNAME>${escapeXML(bankLedger)}</PARTYLEDGERNAME>` : ''}
                         ${bankEntryXml}
                         ${partyEntryXml}`;
 
