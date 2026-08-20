@@ -684,7 +684,7 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                         </LEDGERENTRIES.LIST>`;
     }
 
-    return buildEnvelope(entry, voucherType, dateStr, body, 'Banking Voucher View', forceFirstOfMonth, entry.tallyGuid);
+    return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth, entry.tallyGuid);
 }
 
 /**
