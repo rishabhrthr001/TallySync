@@ -632,114 +632,57 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
         return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth, entry.tallyGuid);
     }
 
-    // --- Bank Voucher (Payment / Receipt / Contra) ---
-    // Uses ALLLEDGERENTRIES.LIST + BANKALLOCATIONS.LIST so transactions
-    // appear inside the bank ledger's register/statement in Tally Prime.
-    //
-    // Sign rules for bank entry:
-    //   Payment → Bank is CREDITED (ISDEEMEDPOSITIVE=No, amount positive)
-    //   Receipt → Bank is DEBITED  (ISDEEMEDPOSITIVE=Yes, amount negative)
-    //   Contra  → Source bank CREDITED, Destination bank DEBITED
+    // -----------------------------------------------------------------------
+    // IMPORTANT: DO NOT use ALLLEDGERENTRIES.LIST + BANKALLOCATIONS.LIST
+    // That advanced bank view crashes Tally with memory access violation unless
+    // the ledger is fully configured as a bank in Tally settings.
+    // Use plain LEDGERENTRIES.LIST — always works, never crashes.
+    // -----------------------------------------------------------------------
 
-    const refNum = entry.invoiceNumber || '';
-    const narration = entry.notes || '';
-
-    let bankEntryXml, partyEntryXml;
+    let body;
 
     if (entry.type === 'payment') {
-        // Bank ledger: Credit (money going out)
-        bankEntryXml = `
-                        <ALLLEDGERENTRIES.LIST>
+        // Payment: Bank is Credited (money out), Party is Debited
+        body = `
+                        <PARTYLEDGERNAME>${escapeXML(partyLedger)}</PARTYLEDGERNAME>
+                        <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
                             <AMOUNT>${amount.toFixed(2)}</AMOUNT>
-                            <BANKALLOCATIONS.LIST>
-                                <DATE>${dateStr}</DATE>
-                                <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
-                                <INSTRUMENTNUMBER>${escapeXML(refNum)}</INSTRUMENTNUMBER>
-                                <PAYMENTFAVOURING>${escapeXML(partyLedger)}</PAYMENTFAVOURING>
-                                <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
-                                <PAYMENTMODE>Transacted</PAYMENTMODE>
-                                <AMOUNT>${amount.toFixed(2)}</AMOUNT>
-                            </BANKALLOCATIONS.LIST>
-                        </ALLLEDGERENTRIES.LIST>`;
-        // Party/Expense ledger: Debit (receiving the payment)
-        partyEntryXml = `
-                        <ALLLEDGERENTRIES.LIST>
+                        </LEDGERENTRIES.LIST>
+                        <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
                             <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
-                        </ALLLEDGERENTRIES.LIST>`;
+                        </LEDGERENTRIES.LIST>`;
     } else if (entry.type === 'receipt') {
-        // Bank ledger: Debit (money coming in)
-        bankEntryXml = `
-                        <ALLLEDGERENTRIES.LIST>
+        // Receipt: Bank is Debited (money in), Party is Credited
+        body = `
+                        <PARTYLEDGERNAME>${escapeXML(partyLedger)}</PARTYLEDGERNAME>
+                        <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
                             <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
-                            <BANKALLOCATIONS.LIST>
-                                <DATE>${dateStr}</DATE>
-                                <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
-                                <INSTRUMENTNUMBER>${escapeXML(refNum)}</INSTRUMENTNUMBER>
-                                <PAYMENTFAVOURING>${escapeXML(partyLedger)}</PAYMENTFAVOURING>
-                                <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
-                                <PAYMENTMODE>Transacted</PAYMENTMODE>
-                                <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
-                            </BANKALLOCATIONS.LIST>
-                        </ALLLEDGERENTRIES.LIST>`;
-        // Party/Income ledger: Credit (paying us)
-        partyEntryXml = `
-                        <ALLLEDGERENTRIES.LIST>
+                        </LEDGERENTRIES.LIST>
+                        <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
                             <AMOUNT>${amount.toFixed(2)}</AMOUNT>
-                        </ALLLEDGERENTRIES.LIST>`;
-    } else { // contra
-        // For Contra: Cash ledgers MUST NOT have BANKALLOCATIONS.LIST
-        // Only actual Bank Account ledgers get BANKALLOCATIONS.LIST
-        const partyIsCash = (partyLedger || '').toLowerCase() === 'cash' ||
-                            (partyLedger || '').toLowerCase().startsWith('cash ') ||
-                            (partyLedger || '').toLowerCase().includes(' cash');
-        const bankIsCash  = (bankLedger || '').toLowerCase() === 'cash'  ||
-                            (bankLedger || '').toLowerCase().startsWith('cash ') ||
-                            (bankLedger || '').toLowerCase().includes(' cash');
-
-        partyEntryXml = `
-                        <ALLLEDGERENTRIES.LIST>
+                        </LEDGERENTRIES.LIST>`;
+    } else { // contra — NO PARTYLEDGERNAME for Contra
+        // Contra: partyLedger credited (source), bankLedger debited (destination)
+        body = `
+                        <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>${!partyIsCash ? `
-                            <BANKALLOCATIONS.LIST>
-                                <DATE>${dateStr}</DATE>
-                                <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
-                                <INSTRUMENTNUMBER>${escapeXML(refNum)}</INSTRUMENTNUMBER>
-                                <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
-                                <PAYMENTMODE>Transacted</PAYMENTMODE>
-                                <AMOUNT>${amount.toFixed(2)}</AMOUNT>
-                            </BANKALLOCATIONS.LIST>` : ''}
-                        </ALLLEDGERENTRIES.LIST>`;
-
-        bankEntryXml = `
-                        <ALLLEDGERENTRIES.LIST>
+                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                        </LEDGERENTRIES.LIST>
+                        <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>${!bankIsCash ? `
-                            <BANKALLOCATIONS.LIST>
-                                <DATE>${dateStr}</DATE>
-                                <INSTRUMENTDATE>${dateStr}</INSTRUMENTDATE>
-                                <INSTRUMENTNUMBER>${escapeXML(refNum)}</INSTRUMENTNUMBER>
-                                <TRANSACTIONTYPE>e-Transfer</TRANSACTIONTYPE>
-                                <PAYMENTMODE>Transacted</PAYMENTMODE>
-                                <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
-                            </BANKALLOCATIONS.LIST>` : ''}
-                        </ALLLEDGERENTRIES.LIST>`;
+                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
+                        </LEDGERENTRIES.LIST>`;
     }
-
-    // Contra vouchers in Tally must NOT have <PARTYLEDGERNAME> — it causes memory crash
-    const body = `${voucherType !== 'Contra' ? `
-                        <PARTYLEDGERNAME>${escapeXML(bankLedger)}</PARTYLEDGERNAME>` : ''}
-                        ${bankEntryXml}
-                        ${partyEntryXml}`;
 
     return buildEnvelope(entry, voucherType, dateStr, body, 'Banking Voucher View', forceFirstOfMonth, entry.tallyGuid);
 }
