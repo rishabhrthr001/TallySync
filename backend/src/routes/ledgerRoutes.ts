@@ -252,6 +252,16 @@ router.post('/sync-transactions', authenticateToken, async (req: any, res) => {
   }
 });
 
+// GET all vouchers for the user's company
+router.get('/vouchers/all', authenticateToken, async (req: any, res) => {
+  try {
+    const vouchers = await Voucher.find({ companyName: req.user.companyName }).sort({ date: -1 });
+    res.json(vouchers);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET Statement of Vouchers for a ledger
 router.get('/:partyName/transactions', authenticateToken, async (req: any, res) => {
   try {
