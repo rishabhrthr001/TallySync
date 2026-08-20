@@ -6,6 +6,9 @@ if (typeof globalThis.ImageData === 'undefined') { (globalThis as any).ImageData
 // @ts-ignore
 if (typeof globalThis.Path2D === 'undefined') { (globalThis as any).Path2D = class {}; }
 
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
@@ -13,7 +16,6 @@ import { fileURLToPath } from 'url';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
-import dotenv from 'dotenv';
 import connectDB from './config/db.js';
 import User from './models/User.js';
 import authRoutes from './routes/authRoutes.js';
@@ -23,8 +25,6 @@ import inventoryRoutes from './routes/inventoryRoutes.js';
 import ledgerRoutes from './routes/ledgerRoutes.js';
 import recognitionRoutes from './routes/recognitionRoutes.js';
 import subscriptionRoutes from './routes/subscriptionRoutes.js';
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
