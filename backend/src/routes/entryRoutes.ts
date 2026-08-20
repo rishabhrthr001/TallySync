@@ -917,4 +917,29 @@ router.post('/bulk-retry', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Bulk delete entries (used by Recent Bills on Dashboard to clear selected/all entries)
+router.post('/bulk-delete', authenticateToken, async (req: any, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'No entry IDs provided for deletion' });
+  }
+
+  try {
+    const query: any = { _id: { $in: ids } };
+    if (req.user.role !== 'admin') {
+      query.companyName = req.user.companyName;
+    }
+
+    const result = await Entry.deleteMany(query);
+
+    res.json({
+      success: true,
+      deletedCount: result.deletedCount,
+      message: `Successfully deleted ${result.deletedCount} entries`
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

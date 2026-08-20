@@ -67,6 +67,57 @@ const Dashboard: React.FC = () => {
   const [showBankPassword, setShowBankPassword] = useState<boolean>(false);
   const [showProModal, setShowProModal] = useState(false);
   const [editingTxnIdx, setEditingTxnIdx] = useState<number | null>(null);
+  
+  // Selection mode states for clearing entries
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedEntries, setSelectedEntries] = useState<string[]>([]);
+
+  const handleSelectEntry = (id: string) => {
+    setSelectedEntries(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllEntries = () => {
+    const visibleEntries = getFilteredRecentEntries();
+    const visibleIds = visibleEntries.map((e: any) => e._id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedEntries.includes(id));
+    if (allSelected) {
+      setSelectedEntries(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedEntries(prev => {
+        const newSelection = [...prev];
+        visibleIds.forEach(id => {
+          if (!newSelection.includes(id)) {
+            newSelection.push(id);
+          }
+        });
+        return newSelection;
+      });
+    }
+  };
+
+  const handleClearSelectedEntries = async () => {
+    if (selectedEntries.length === 0) {
+      showToast("No entries selected", "error");
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to delete ${selectedEntries.length} selected entries?`)) {
+      return;
+    }
+    try {
+      await axios.post('/api/entries/bulk-delete', { ids: selectedEntries }, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      showToast(`Successfully deleted ${selectedEntries.length} entries`, "success");
+      setSelectedEntries([]);
+      setSelectionMode(false);
+      fetchData();
+    } catch (err: any) {
+      console.error("Bulk delete failed", err);
+      showToast(err.response?.data?.error || "Failed to delete entries", "error");
+    }
+  };
 
   const updateTempTxn = (index: number, field: string, value: any) => {
     setTempTransactions(prev => prev.map((t, idx) => idx === index ? { ...t, [field]: value } : t));
