@@ -67,6 +67,35 @@ const Dashboard: React.FC = () => {
   const [showBankPassword, setShowBankPassword] = useState<boolean>(false);
   const [showProModal, setShowProModal] = useState(false);
   const [editingTxnIdx, setEditingTxnIdx] = useState<number | null>(null);
+
+  // States for Tally ledgers and bulk mapping transactions
+  const [tallyLedgers, setTallyLedgers] = useState<any[]>([]);
+  const [selectedTxnIndices, setSelectedTxnIndices] = useState<number[]>([]);
+  const [bulkTargetLedger, setBulkTargetLedger] = useState<string>('');
+
+  const handleRowCheckboxToggle = (idx: number) => {
+    setSelectedTxnIndices(prev => 
+      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+    );
+  };
+
+  const handleHeaderCheckboxChange = () => {
+    if (selectedTxnIndices.length === tempTransactions.length) {
+      setSelectedTxnIndices([]);
+    } else {
+      setSelectedTxnIndices(tempTransactions.map((_, idx) => idx));
+    }
+  };
+
+  const handleBulkMapLedger = () => {
+    if (!bulkTargetLedger) return;
+    setTempTransactions(prev => prev.map((t, idx) => 
+      selectedTxnIndices.includes(idx) ? { ...t, partyName: bulkTargetLedger } : t
+    ));
+    setSelectedTxnIndices([]);
+    setBulkTargetLedger('');
+    showToast(`Mapped ${selectedTxnIndices.length} transactions to ${bulkTargetLedger}!`, 'success');
+  };
   
   // Selection mode states for clearing entries
   const [selectionMode, setSelectionMode] = useState(false);
@@ -185,6 +214,12 @@ const Dashboard: React.FC = () => {
   };
 
   const handleConfirmAndSyncBank = async () => {
+    const suspenseCount = tempTransactions.filter(t => (t.partyName || '').toLowerCase() === 'suspense').length;
+    if (suspenseCount > 0) {
+      showToast(`Cannot sync. There are ${suspenseCount} transaction(s) still in Suspense. Map them first!`, "error");
+      return;
+    }
+
     if (tempTransactions.length === 0) {
       showToast("No transactions left to sync.", "error");
       return;
@@ -237,6 +272,49 @@ const Dashboard: React.FC = () => {
   // Tab filter state for recent entries
   const [recentFilter, setRecentFilter] = useState<'all' | 'today' | 'yesterday' | 'week'>('all');
   const [retryingBillId, setRetryingBillId] = useState<string | null>(null);
+
+  // Load Tally ledgers and auto-resolve mappings when modal opens
+  useEffect(() => {
+    if (isBankModalOpen) {
+      const loadLedgers = async () => {
+        try {
+          const res = await axios.get('/api/ledgers', {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          });
+          setTallyLedgers(res.data || []);
+        } catch (e) {
+          console.error("Failed to load Tally ledgers", e);
+        }
+      };
+      loadLedgers();
+    }
+  }, [isBankModalOpen]);
+
+  useEffect(() => {
+    if (tallyLedgers.length > 0 && tempTransactions.length > 0) {
+      // Auto-map based on exact or fuzzy match; otherwise default to Suspense
+      setTempTransactions(prev => prev.map(t => {
+        if (t.partyName && t.partyName !== 'Suspense') {
+          return t;
+        }
+        const targetName = (t.partyName || t.notes || '').toLowerCase().trim();
+        
+        // Exact case-insensitive match
+        const exactMatch = tallyLedgers.find(l => l.partyName.toLowerCase().trim() === targetName);
+        if (exactMatch) {
+          return { ...t, partyName: exactMatch.partyName };
+        }
+
+        // Fuzzy match: check if ledger name is part of statement text or vice versa
+        const fuzzyMatch = tallyLedgers.find(l => {
+          const lName = l.partyName.toLowerCase().trim();
+          return targetName.includes(lName) || lName.includes(targetName);
+        });
+
+        return { ...t, partyName: fuzzyMatch ? fuzzyMatch.partyName : 'Suspense' };
+      }));
+    }
+  }, [tallyLedgers]);
 
   const handlePrintBill = async (entry: any) => {
     const tot = Number(entry.totalAmount || 0);
@@ -1119,12 +1197,48 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Bulk mapping action bar */}
+                  {selectedTxnIndices.length > 0 && (
+                    <div className="flex items-center gap-3 bg-slate-100 p-3 rounded-2xl border border-slate-200 shadow-sm animate-fade-in">
+                      <span className="text-xs font-bold text-slate-655">
+                        Selected {selectedTxnIndices.length} transaction(s):
+                      </span>
+                      <select
+                        value={bulkTargetLedger}
+                        onChange={(e) => setBulkTargetLedger(e.target.value)}
+                        className="px-3 py-1.5 bg-white border border-slate-250 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer shadow-xs"
+                      >
+                        <option value="">-- Map to Tally Ledger --</option>
+                        <option value="Suspense">Suspense (Unmapped)</option>
+                        {tallyLedgers.map(l => (
+                          <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleBulkMapLedger}
+                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-500/10 transition-all cursor-pointer"
+                        disabled={!bulkTargetLedger}
+                      >
+                        Apply Map
+                      </button>
+                    </div>
+                  )}
+
                   {/* High Density Statement Transactions Table */}
                   <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs bg-white">
                     <div className="max-h-[380px] overflow-y-auto">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider sticky top-0 z-10 border-b border-slate-200">
                           <tr>
+                            <th className="p-3 w-10 text-center">
+                              <input 
+                                type="checkbox"
+                                checked={tempTransactions.length > 0 && selectedTxnIndices.length === tempTransactions.length}
+                                onChange={handleHeaderCheckboxChange}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
+                              />
+                            </th>
                             <th className="p-3 w-28">Date</th>
                             <th className="p-3">Particulars / Narration</th>
                             <th className="p-3 text-right w-32">Deposits (Cr)</th>
@@ -1155,7 +1269,17 @@ const Dashboard: React.FC = () => {
                               const isEditing = editingTxnIdx === idx;
 
                               return (
-                                <tr key={idx} className={isEditing ? "bg-indigo-50/50" : "hover:bg-slate-50/80 transition-colors"}>
+                                <tr key={idx} className={isEditing ? "bg-indigo-50/50" : (selectedTxnIndices.includes(idx) ? "bg-indigo-50/15" : "hover:bg-slate-50/80 transition-colors")}>
+                                  {/* Checkbox */}
+                                  <td className="p-3 text-center align-middle">
+                                    <input 
+                                      type="checkbox"
+                                      checked={selectedTxnIndices.includes(idx)}
+                                      onChange={() => handleRowCheckboxToggle(idx)}
+                                      className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
+                                    />
+                                  </td>
+                                  
                                   {/* Date */}
                                   <td className="p-3 align-top whitespace-nowrap font-mono text-slate-600">
                                     {isEditing ? (
@@ -1190,9 +1314,22 @@ const Dashboard: React.FC = () => {
                                         />
                                       </div>
                                     ) : (
-                                      <div>
-                                        <div className="font-bold text-slate-900">{txn.partyName || 'Bank Entry'}</div>
-                                        <div className="text-[11px] text-slate-500 font-normal leading-tight mt-0.5">{txn.notes}</div>
+                                      <div className="space-y-1.5 max-w-sm">
+                                        <select
+                                          value={txn.partyName || 'Suspense'}
+                                          onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
+                                          className={`p-1.5 w-full bg-slate-50 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-bold transition-all cursor-pointer ${
+                                            txn.partyName === 'Suspense' 
+                                              ? 'border-purple-250 text-purple-700 font-black bg-purple-50/30' 
+                                              : 'border-slate-200 text-slate-900'
+                                          }`}
+                                        >
+                                          <option value="Suspense">⚠️ Suspense (Unmapped)</option>
+                                          {tallyLedgers.map(l => (
+                                            <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
+                                          ))}
+                                        </select>
+                                        <div className="text-[10px] text-slate-400 font-normal leading-tight line-clamp-1">{txn.notes}</div>
                                       </div>
                                     )}
                                   </td>
