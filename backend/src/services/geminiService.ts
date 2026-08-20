@@ -59,7 +59,9 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   try {
     await fs.promises.writeFile(inputPath, buffer);
     // pdftotext -layout preserves columns and tabular structure for bank statements
-    const cmd = `pdftotext -layout "${inputPath}" "${outputPath}"`;
+    const customPdftotextPath = path.join(process.cwd(), 'bin', 'poppler', 'poppler-26.02.0', 'Library', 'bin', 'pdftotext.exe');
+    const pdftotextExe = fs.existsSync(customPdftotextPath) ? `"${customPdftotextPath}"` : 'pdftotext';
+    const cmd = `${pdftotextExe} -layout "${inputPath}" "${outputPath}"`;
     await execPromise(cmd);
     if (fs.existsSync(outputPath)) {
       const text = await fs.promises.readFile(outputPath, 'utf-8');

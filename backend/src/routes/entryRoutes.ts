@@ -524,7 +524,9 @@ async function decryptPdf(buffer: Buffer, password?: string): Promise<Buffer> {
 
     // Strategy 1: qpdf (Gold standard: supports RC4, AES-128, AES-256 encrypted bank PDFs)
     try {
-      const qpdfCmd = `qpdf --password="${escapedPassword}" --decrypt "${inputPath}" "${outputPath}"`;
+      const customQpdfPath = path.join(process.cwd(), 'bin', 'qpdf-12.4.0-msvc64', 'bin', 'qpdf.exe');
+      const qpdfExe = fs.existsSync(customQpdfPath) ? `"${customQpdfPath}"` : 'qpdf';
+      const qpdfCmd = `${qpdfExe} --password="${escapedPassword}" --decrypt "${inputPath}" "${outputPath}"`;
       try {
         await execPromise(qpdfCmd);
       } catch (qpdfErr: any) {

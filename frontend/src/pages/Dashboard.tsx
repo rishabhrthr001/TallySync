@@ -17,6 +17,29 @@ import PrintableInvoice from '../components/PrintableInvoice';
 import { useReactToPrint } from 'react-to-print';
 import ProUpgradeModal from '../components/ProUpgradeModal';
 
+const SUPPORTED_BANKS = [
+  "HDFC Bank",
+  "ICICI Bank",
+  "State Bank of India",
+  "Axis Bank",
+  "Kotak Mahindra Bank",
+  "Punjab National Bank",
+  "Bank of Baroda",
+  "Canara Bank",
+  "IndusInd Bank",
+  "IDFC FIRST Bank",
+  "Union Bank of India",
+  "Indian Bank",
+  "Bank of India",
+  "Yes Bank",
+  "Federal Bank",
+  "South Indian Bank",
+  "AU Small Finance Bank",
+  "IDBI Bank",
+  "RBL Bank",
+  "Bandhan Bank"
+];
+
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -35,6 +58,7 @@ const Dashboard: React.FC = () => {
   const [isBankModalOpen, setIsBankModalOpen] = useState(false);
   const [bankFile, setBankFile] = useState<File | null>(null);
   const [parsingBank, setParsingBank] = useState(false);
+  const [selectedBank, setSelectedBank] = useState<string>('HDFC Bank');
   const [bankParseResult, setBankParseResult] = useState<any>(null);
   const [targetBankLedger, setTargetBankLedger] = useState<string>('');
   const [tempTransactions, setTempTransactions] = useState<any[]>([]);
@@ -42,7 +66,7 @@ const Dashboard: React.FC = () => {
   const [bankPassword, setBankPassword] = useState<string>('');
   const [showBankPassword, setShowBankPassword] = useState<boolean>(false);
   const [showProModal, setShowProModal] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const [editingTxnIdx, setEditingTxnIdx] = useState<number | null>(null);
 
   const updateTempTxn = (index: number, field: string, value: any) => {
     setTempTransactions(prev => prev.map((t, idx) => idx === index ? { ...t, [field]: value } : t));
@@ -74,6 +98,9 @@ const Dashboard: React.FC = () => {
 
     const formData = new FormData();
     formData.append('pdf', bankFile);
+    if (selectedBank) {
+      formData.append('selectedBank', selectedBank);
+    }
     if (bankPassword) {
       formData.append('password', bankPassword);
     }
@@ -85,7 +112,7 @@ const Dashboard: React.FC = () => {
           Authorization: `Bearer ${localStorage.getItem('token')}`
         }
       });
-      const detectedBank = (res.data.bankName || 'Bank Account').trim();
+      const detectedBank = selectedBank || (res.data.bankName || 'Bank Account').trim();
       setBankParseResult(res.data);
       setTargetBankLedger(detectedBank);
       setTempTransactions(res.data.data || []);
@@ -98,6 +125,14 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const cleanNum = (val: any): number => {
+    if (val == null) return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    const cleaned = String(val).replace(/,/g, '').replace(/[^\d.\-]/g, '').trim();
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? 0 : n;
+  };
+
   const handleConfirmAndSyncBank = async () => {
     if (tempTransactions.length === 0) {
       showToast("No transactions left to sync.", "error");
@@ -105,7 +140,7 @@ const Dashboard: React.FC = () => {
     }
     setSyncSaving(true);
     try {
-      const bankName = (targetBankLedger || 'Bank Account').trim();
+      const bankName = (targetBankLedger || selectedBank || 'Bank Account').trim();
       const enrichedTransactions = tempTransactions.map(t => ({
         ...t,
         bankLedger: (t.bankLedger || bankName).trim()
@@ -124,7 +159,6 @@ const Dashboard: React.FC = () => {
       setTempTransactions([]);
       setTargetBankLedger('');
       setBankPassword('');
-      setShowDetails(false);
       fetchData();
     } catch (err: any) {
       console.error(err);
@@ -141,6 +175,7 @@ const Dashboard: React.FC = () => {
     contentRef: printRef,
     onAfterPrint: () => setPrintData(null)
   });
+
 
   useEffect(() => {
     if (printData && printRef.current) {
@@ -809,75 +844,94 @@ const Dashboard: React.FC = () => {
       {/* Bank Statement Modal */}
       {isBankModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <div className="bg-white rounded-3xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-emerald-50 text-emerald-605 rounded-xl">
+                <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs">
                   <CreditCard className="h-5 w-5" />
                 </div>
-                <h3 className="text-xl font-black text-slate-800">Upload Bank Statement</h3>
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 leading-none">Upload Bank Statement</h3>
+                  <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Extract, review, edit, and sync bank vouchers directly to Tally</p>
+                </div>
               </div>
               <button 
                 onClick={() => {
                   setIsBankModalOpen(false);
                   setBankFile(null);
                   setBankParseResult(null);
+                  setTempTransactions([]);
                 }} 
-                className="text-slate-400 hover:text-slate-650 transition-colors p-1 cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 transition-colors p-1 cursor-pointer"
               >
                 <XCircle className="h-6 w-6" />
               </button>
             </div>
             
-            <form onSubmit={handleBankUpload} className="p-6 space-y-6">
+            <form onSubmit={handleBankUpload} className="p-6 space-y-5 overflow-y-auto flex-1">
               {!bankParseResult ? (
                 <>
-                  <p className="text-sm font-semibold text-slate-500 leading-relaxed">
-                    Upload your bank statement PDF to extract transactions, review/edit details, and sync them directly to your Tally software.
-                  </p>
-                  
-                  <div className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-8 flex flex-col items-center justify-center bg-slate-50/50 hover:bg-indigo-50/5 transition-all relative">
-                    <input 
-                      type="file" 
-                      accept=".pdf"
-                      onChange={(e) => setBankFile(e.target.files?.[0] || null)}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                      disabled={parsingBank}
-                    />
-                    <CreditCard className="h-10 w-10 text-slate-400 mb-3 stroke-[1.5]" />
-                    <span className="text-sm font-bold text-slate-700">
-                      {bankFile ? bankFile.name : 'Choose bank statement PDF'}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">
-                      {bankFile ? `${(bankFile.size / (1024 * 1024)).toFixed(2)} MB` : 'PDF format only'}
-                    </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Bank Selection */}
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Select Bank</label>
+                      <select 
+                        value={selectedBank}
+                        onChange={(e) => setSelectedBank(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition-all cursor-pointer"
+                        disabled={parsingBank}
+                      >
+                        {SUPPORTED_BANKS.map((b) => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* PDF File Upload dropzone */}
+                    <div className="sm:col-span-2 border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-8 flex flex-col items-center justify-center bg-slate-50/50 hover:bg-indigo-50/5 transition-all relative">
+                      <input 
+                        type="file" 
+                        accept=".pdf"
+                        onChange={(e) => setBankFile(e.target.files?.[0] || null)}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        disabled={parsingBank}
+                      />
+                      <CreditCard className="h-10 w-10 text-indigo-500 mb-3 stroke-[1.5]" />
+                      <span className="text-sm font-bold text-slate-700">
+                        {bankFile ? bankFile.name : 'Choose bank statement PDF'}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">
+                        {bankFile ? `${(bankFile.size / (1024 * 1024)).toFixed(2)} MB` : 'PDF format only'}
+                      </span>
+                    </div>
+
+                    {/* PDF Password Input */}
+                    {bankFile && (
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">PDF Password (If Encrypted)</label>
+                        <div className="relative flex items-center">
+                          <input 
+                            type={showBankPassword ? "text" : "password"}
+                            placeholder="Enter statement password (e.g. DOB, PAN, Account No)"
+                            value={bankPassword}
+                            onChange={(e) => setBankPassword(e.target.value)}
+                            className="w-full pl-3.5 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-850 outline-none focus:border-indigo-400 focus:bg-white transition-all"
+                            disabled={parsingBank}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowBankPassword(!showBankPassword)}
+                            className="absolute right-3 text-slate-400 hover:text-slate-600 transition-colors p-1"
+                            title={showBankPassword ? "Hide password" : "Show password"}
+                          >
+                            {showBankPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {bankFile && (
-                    <div className="space-y-1 mt-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">PDF Password (If Encrypted)</label>
-                      <div className="relative flex items-center">
-                        <input 
-                          type={showBankPassword ? "text" : "password"}
-                          placeholder="Enter statement password (e.g. DOB, PAN, Account No)"
-                          value={bankPassword}
-                          onChange={(e) => setBankPassword(e.target.value)}
-                          className="w-full pl-3.5 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-850 outline-none focus:border-indigo-400 focus:bg-white transition-all"
-                          disabled={parsingBank}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowBankPassword(!showBankPassword)}
-                          className="absolute right-3 text-slate-400 hover:text-slate-600 transition-colors p-1"
-                          title={showBankPassword ? "Hide password" : "Show password"}
-                        >
-                          {showBankPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="flex justify-end gap-3">
+                  <div className="flex justify-end gap-3 pt-2">
                     <button
                       type="button"
                       onClick={() => {
@@ -892,211 +946,229 @@ const Dashboard: React.FC = () => {
                     <button
                       type="submit"
                       disabled={!bankFile || parsingBank}
-                      className="px-6 py-3 bg-gradient-to-tr from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/10 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-6 py-3 bg-gradient-to-tr from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/10 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {parsingBank ? (
                         <>
                           <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
-                          Processing...
+                          Extracting Statement Data...
                         </>
                       ) : (
-                        'Extract & Preview'
+                        'Extract & View Data'
                       )}
                     </button>
                   </div>
                 </>
               ) : (
                 <div className="space-y-4">
-                  {/* Bank Workspace Header Card */}
-                  <div className="p-4 bg-gradient-to-br from-indigo-50/90 via-slate-50 to-emerald-50/50 rounded-2xl border border-indigo-100/80 shadow-xs space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs">
-                          <CreditCard className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">
-                            Target Bank Workspace
-                          </div>
-                          <div className="text-sm font-black text-slate-850 flex items-center gap-1.5">
-                            {targetBankLedger || 'Bank Account'}
-                            {bankParseResult?.accountNumber && (
-                              <span className="text-[11px] font-semibold text-slate-400">
-                                (A/c: {bankParseResult.accountNumber})
-                              </span>
-                            )}
-                          </div>
+                  {/* Top Statement Info Banner */}
+                  <div className="p-4 bg-slate-900 text-white rounded-2xl shadow-sm space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                      <div>
+                        <div className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Bank Statement Info</div>
+                        <div className="text-base font-black text-white flex items-center gap-2">
+                          {selectedBank || targetBankLedger}
+                          {bankParseResult.accountNumber && (
+                            <span className="text-xs font-semibold text-slate-400">
+                              (A/c: {bankParseResult.accountNumber})
+                            </span>
+                          )}
                         </div>
                       </div>
-                      {bankParseResult?.statementPeriod?.from && (
-                        <div className="text-right">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Period</span>
-                          <span className="text-[11px] font-bold text-slate-600">
-                            {bankParseResult.statementPeriod.from} to {bankParseResult.statementPeriod.to || 'Present'}
+
+                      <div className="flex gap-4 text-right">
+                        <div>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Opening Balance</span>
+                          <span className="text-xs font-black text-emerald-400">
+                            ₹{cleanNum(bankParseResult.openingBalance).toLocaleString('en-IN')}
                           </span>
                         </div>
-                      )}
+                        <div>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Closing Balance</span>
+                          <span className="text-xs font-black text-indigo-400">
+                            ₹{cleanNum(bankParseResult.closingBalance).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                        {bankParseResult?.statementPeriod?.from && (
+                          <div>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Period</span>
+                            <span className="text-xs font-bold text-slate-300">
+                              {bankParseResult.statementPeriod.from} to {bankParseResult.statementPeriod.to || 'Present'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Target Ledger Editor in Tally */}
-                    <div className="pt-2 border-t border-slate-200/60 grid grid-cols-1 sm:grid-cols-3 gap-2 items-center">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider col-span-1">
-                        Bank Ledger Name in Tally:
-                      </label>
-                      <div className="col-span-2 flex gap-1.5">
+                    {/* Tally Bank Ledger Target Editor */}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-300">Target Tally Ledger:</span>
                         <input 
                           type="text"
                           value={targetBankLedger}
                           onChange={(e) => handleApplyBankLedgerToAll(e.target.value)}
-                          placeholder="e.g. ICICI Bank, HDFC Bank"
-                          className="flex-1 px-3 py-1.5 bg-white border border-slate-250 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
+                          className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs font-bold text-white outline-none focus:border-indigo-500"
                         />
                       </div>
-                    </div>
 
-                    {/* Auto creation notice */}
-                    <div className="flex items-start gap-1.5 text-[10px] text-indigo-700/90 font-semibold bg-indigo-100/50 p-2 rounded-xl">
-                      <Sparkles className="h-3.5 w-3.5 text-indigo-600 shrink-0 mt-0.5" />
-                      <span>
-                        <strong>Auto Tally Sync:</strong> If <strong>"{targetBankLedger || 'Bank Account'}"</strong> does not exist in Tally, TallySync will automatically create the bank ledger under <strong>Bank Accounts</strong> before posting vouchers.
-                      </span>
-                    </div>
-
-                    {/* Financial stats summary */}
-                    <div className="grid grid-cols-3 gap-2 pt-1">
-                      <div className="p-2 bg-white/80 rounded-xl border border-slate-200/60 text-center">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Total Txns</span>
-                        <span className="text-xs font-black text-slate-800">{tempTransactions.length}</span>
-                      </div>
-                      <div className="p-2 bg-white/80 rounded-xl border border-emerald-200/60 text-center">
-                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider block">Money In (Receipts)</span>
-                        <span className="text-xs font-black text-emerald-700">
-                          ₹{tempTransactions.filter(t => t.type === 'receipt').reduce((acc, t) => acc + (Number(t.totalAmount) || 0), 0).toLocaleString('en-IN')}
-                        </span>
-                      </div>
-                      <div className="p-2 bg-white/80 rounded-xl border border-rose-200/60 text-center">
-                        <span className="text-[9px] font-black text-rose-600 uppercase tracking-wider block">Money Out (Payments)</span>
-                        <span className="text-xs font-black text-rose-700">
-                          ₹{tempTransactions.filter(t => t.type === 'payment').reduce((acc, t) => acc + (Number(t.totalAmount) || 0), 0).toLocaleString('en-IN')}
-                        </span>
+                      <div className="text-xs font-bold text-slate-400">
+                        Total Transactions: <span className="text-white font-mono">{tempTransactions.length}</span>
                       </div>
                     </div>
                   </div>
-                  
-                  {/* Toggle list details optionally */}
-                  <button
-                    type="button"
-                    onClick={() => setShowDetails(!showDetails)}
-                    className="w-full py-2.5 bg-slate-100/80 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    {showDetails ? 'Hide Transaction Details' : `Show Transaction Details (${tempTransactions.length} items)`}
-                  </button>
 
-                  {/* Preview list */}
-                  {showDetails && (
-                    <div className="max-h-80 overflow-y-auto space-y-3 pr-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
-                      {tempTransactions.map((txn: any, idx: number) => (
-                        <div key={idx} className="relative p-3.5 bg-slate-50 hover:bg-white rounded-2xl border border-slate-200/80 hover:border-indigo-200 transition-all shadow-xs space-y-3">
-                          <button
-                            type="button"
-                            onClick={() => removeTempTxn(idx)}
-                            className="absolute top-2.5 right-2.5 text-slate-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
-                            title="Exclude transaction"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                  {/* High Density Statement Transactions Table */}
+                  <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs bg-white">
+                    <div className="max-h-[380px] overflow-y-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider sticky top-0 z-10 border-b border-slate-200">
+                          <tr>
+                            <th className="p-3 w-28">Date</th>
+                            <th className="p-3">Particulars / Narration</th>
+                            <th className="p-3 text-right w-32">Deposits (Cr)</th>
+                            <th className="p-3 text-right w-32">Withdrawals (Dr)</th>
+                            <th className="p-3 text-right w-36">Balance</th>
+                            <th className="p-3 text-center w-24">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                          {(() => {
+                            let runningBal = cleanNum(bankParseResult?.openingBalance);
+                            return tempTransactions.map((txn: any, idx: number) => {
+                              const amt = cleanNum(txn.totalAmount);
+                              const typeLower = (txn.type || '').toLowerCase();
+                              let isDeposit = typeLower === 'receipt';
+                              let isWithdrawal = typeLower === 'payment';
+                              if (typeLower === 'contra') {
+                                if ((txn.notes || '').toLowerCase().includes('deposit') || (txn.partyName || '').toLowerCase().includes('deposit')) {
+                                  isDeposit = true;
+                                } else {
+                                  isWithdrawal = true;
+                                }
+                              }
 
-                          {/* Top metadata row */}
-                          <div className="grid grid-cols-2 gap-2.5 pr-6">
-                            <div>
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Date</label>
-                              <input 
-                                type="date"
-                                value={txn.date}
-                                onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
-                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Voucher Type</label>
-                              <select
-                                value={txn.type}
-                                onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
-                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-indigo-400 uppercase"
-                              >
-                                <option value="payment">Payment (Money Out)</option>
-                                <option value="receipt">Receipt (Money In)</option>
-                                <option value="contra">Contra (Bank/Cash Transfer)</option>
-                                <option value="journal">Journal</option>
-                              </select>
-                            </div>
-                          </div>
+                              if (isDeposit) runningBal += amt;
+                              else if (isWithdrawal) runningBal -= amt;
 
-                          {/* Party name input & Bank ledger */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            <div>
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Party / Counter Ledger</label>
-                              <input 
-                                type="text"
-                                value={txn.partyName}
-                                onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
-                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Bank Ledger</label>
-                              <input 
-                                type="text"
-                                value={txn.bankLedger || targetBankLedger}
-                                onChange={(e) => updateTempTxn(idx, 'bankLedger', e.target.value)}
-                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-indigo-700 outline-none focus:border-indigo-400"
-                              />
-                            </div>
-                          </div>
+                              const isEditing = editingTxnIdx === idx;
 
-                          {/* Amount & Notes */}
-                          <div className="grid grid-cols-3 gap-2.5 items-end">
-                            <div className="col-span-1">
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Amount (₹)</label>
-                              <input 
-                                type="number"
-                                value={txn.totalAmount}
-                                onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
-                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-indigo-400 font-mono"
-                              />
-                            </div>
-                            <div className="col-span-2">
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Narration / Description</label>
-                              <input 
-                                type="text"
-                                value={txn.notes}
-                                onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
-                                placeholder="Transaction details..."
-                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 outline-none focus:border-indigo-400"
-                              />
-                            </div>
-                          </div>
+                              return (
+                                <tr key={idx} className={isEditing ? "bg-indigo-50/50" : "hover:bg-slate-50/80 transition-colors"}>
+                                  {/* Date */}
+                                  <td className="p-3 align-top whitespace-nowrap font-mono text-slate-600">
+                                    {isEditing ? (
+                                      <input 
+                                        type="date"
+                                        value={txn.date}
+                                        onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
+                                        className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
+                                      />
+                                    ) : (
+                                      txn.date
+                                    )}
+                                  </td>
 
-                          {/* Quality score bar */}
-                          {txn.confidence !== undefined && (
-                            <div className="flex items-center gap-2 pt-1 border-t border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                              <span>Confidence:</span>
-                              <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                                <div 
-                                  className={`h-full rounded-full ${txn.confidence > 0.8 ? 'bg-emerald-500' : txn.confidence > 0.5 ? 'bg-amber-500' : 'bg-rose-500'}`} 
-                                  style={{ width: `${txn.confidence * 100}%` }}
-                                />
-                              </div>
-                              <span>{(txn.confidence * 100).toFixed(0)}%</span>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                                  {/* Particulars & Narration */}
+                                  <td className="p-3 align-top">
+                                    {isEditing ? (
+                                      <div className="space-y-1">
+                                        <input 
+                                          type="text"
+                                          value={txn.partyName}
+                                          onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
+                                          placeholder="Party Ledger Name"
+                                          className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
+                                        />
+                                        <input 
+                                          type="text"
+                                          value={txn.notes}
+                                          onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
+                                          placeholder="Narration details..."
+                                          className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] text-slate-600"
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <div className="font-bold text-slate-900">{txn.partyName || 'Bank Entry'}</div>
+                                        <div className="text-[11px] text-slate-500 font-normal leading-tight mt-0.5">{txn.notes}</div>
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Deposits */}
+                                  <td className="p-3 align-top text-right font-mono font-bold text-emerald-600 whitespace-nowrap">
+                                    {isEditing ? (
+                                      <div className="space-y-1">
+                                        <select
+                                          value={txn.type}
+                                          onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
+                                          className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] font-bold uppercase"
+                                        >
+                                          <option value="receipt">Receipt (Cr)</option>
+                                          <option value="payment">Payment (Dr)</option>
+                                          <option value="contra">Contra</option>
+                                        </select>
+                                        <input 
+                                          type="number"
+                                          value={txn.totalAmount}
+                                          onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
+                                          className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-right"
+                                        />
+                                      </div>
+                                    ) : isDeposit ? (
+                                      `₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                                    ) : (
+                                      <span className="text-slate-300 font-normal">-</span>
+                                    )}
+                                  </td>
+
+                                  {/* Withdrawals */}
+                                  <td className="p-3 align-top text-right font-mono font-bold text-rose-600 whitespace-nowrap">
+                                    {!isEditing && (isWithdrawal ? (
+                                      `₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                                    ) : (
+                                      <span className="text-slate-300 font-normal">-</span>
+                                    ))}
+                                  </td>
+
+                                  {/* Balance */}
+                                  <td className="p-3 align-top text-right font-mono font-bold text-slate-800 whitespace-nowrap">
+                                    `₹${runningBal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                                  </td>
+
+                                  {/* Action */}
+                                  <td className="p-3 align-top text-center whitespace-nowrap">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingTxnIdx(isEditing ? null : idx)}
+                                        className={`p-1.5 rounded-lg transition-colors ${isEditing ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                                        title={isEditing ? "Save Row" : "Edit Row"}
+                                      >
+                                        <Check className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => removeTempTxn(idx)}
+                                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                        title="Delete Row"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            });
+                          })()}
+                        </tbody>
+                      </table>
                     </div>
-                  )}
+                  </div>
 
-                  {/* Submit / Cancel Actions */}
-                  <div className="flex gap-3 pt-2">
+                  {/* Sync to Tally Footer Action Bar */}
+                  <div className="flex items-center justify-between gap-3 pt-2">
                     <button
                       type="button"
                       onClick={() => {
@@ -1104,28 +1176,27 @@ const Dashboard: React.FC = () => {
                         setBankFile(null);
                         setBankParseResult(null);
                         setTempTransactions([]);
-                        setTargetBankLedger('');
                       }}
-                      className="flex-1 py-3 border border-slate-250 hover:bg-slate-50 text-slate-600 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center"
+                      className="px-5 py-3 border border-slate-250 hover:bg-slate-50 text-slate-600 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer"
                       disabled={syncSaving}
                     >
-                      Discard Vouchers
+                      Discard Statement
                     </button>
                     <button
                       type="button"
                       onClick={handleConfirmAndSyncBank}
                       disabled={syncSaving || tempTransactions.length === 0}
-                      className="flex-2 py-3 bg-gradient-to-tr from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/10 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      className="px-8 py-3 bg-gradient-to-tr from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/10 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     >
                       {syncSaving ? (
                         <>
                           <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
-                          Syncing to Tally...
+                          Syncing Vouchers to Tally...
                         </>
                       ) : (
                         <>
                           <Check className="h-4 w-4" />
-                          Confirm & Sync ({tempTransactions.length}) to {targetBankLedger || 'Tally'}
+                          Sync ({tempTransactions.length} Transactions) to Tally
                         </>
                       )}
                     </button>
@@ -1173,4 +1244,3 @@ const StatCard: React.FC<any> = ({ title, value, icon: Icon, color, change, posi
 };
 
 export default Dashboard;
-
