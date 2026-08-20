@@ -214,12 +214,6 @@ const Dashboard: React.FC = () => {
   };
 
   const handleConfirmAndSyncBank = async () => {
-    const suspenseCount = tempTransactions.filter(t => (t.partyName || '').toLowerCase() === 'suspense').length;
-    if (suspenseCount > 0) {
-      showToast(`Cannot sync. There are ${suspenseCount} transaction(s) still in Suspense. Map them first!`, "error");
-      return;
-    }
-
     if (tempTransactions.length === 0) {
       showToast("No transactions left to sync.", "error");
       return;
