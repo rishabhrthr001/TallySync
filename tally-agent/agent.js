@@ -828,9 +828,23 @@ async function syncEntry(entry) {
     }
 
     const bankVoucherTypes = ['payment', 'receipt', 'contra', 'journal'];
-    if (bankVoucherTypes.includes(entry.type.toLowerCase())) {
+    const isBankOrUpi = bankVoucherTypes.includes(entry.type.toLowerCase()) || Boolean(entry.bankLedger) || isUpiTransaction(entry);
+
+    if (isBankOrUpi) {
+        // Ensure bank statement & UPI transactions are strictly Receipt (Money in / CR) or Payment (Money out / DR), never Purchase/Sales
+        const typeLower = (entry.type || '').toLowerCase();
+        if (typeLower === 'sales' || typeLower === 'receipt' || typeLower === 'cr' || typeLower === 'credit') {
+            entry.type = 'receipt';
+        } else if (typeLower === 'contra') {
+            entry.type = 'contra';
+        } else if (typeLower === 'journal') {
+            entry.type = 'journal';
+        } else {
+            entry.type = 'payment';
+        }
+
         const isAlter = entry.action === 'alter' || Boolean(entry.tallyGuid);
-        console.log(`[SYNC] Handling bank voucher (${isAlter ? 'ALTER' : 'CREATE'}): ${entry.type} (${entry.invoiceNumber})`);
+        console.log(`[SYNC] Handling bank/UPI voucher (${isAlter ? 'ALTER' : 'CREATE'}): ${entry.type.toUpperCase()} (${entry.invoiceNumber})`);
         try {
             // 1. Fetch current Tally ledger list
             const masterData = await getLedgerList(entry.companyName);
@@ -842,7 +856,7 @@ async function syncEntry(entry) {
             const originalPartyName = entry.bankPartyName || (partyName !== 'UPI' && partyName !== 'Suspense' ? partyName : '');
             const isUpi = isUpiTransaction(entry);
 
-            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Account Type: "${entry.accountType || 'Current Account'}", Party: "${partyName}", isUPI: ${isUpi}`);
+            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Account Type: "${entry.accountType || 'Current Account'}", Party: "${partyName}", isUPI: ${isUpi}, VoucherType: "${entry.type}"`);
 
             // Resolve bank ledger name: check if exists in Tally
             const bankExact = findExactName(masterData, bankName);

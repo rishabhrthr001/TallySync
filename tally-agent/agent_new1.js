@@ -851,8 +851,22 @@ async function syncEntry(entry) {
     entry.companyName = await resolveCompanyName(entry.companyName);
 
     const bankVoucherTypes = ['payment', 'receipt', 'contra', 'journal'];
-    if (bankVoucherTypes.includes(entry.type.toLowerCase())) {
-        console.log(`[SYNC] Handling bank statement/accounting-only voucher: ${entry.type}`);
+    const isBankOrUpi = bankVoucherTypes.includes(entry.type.toLowerCase()) || Boolean(entry.bankLedger) || isUpiTransaction(entry);
+
+    if (isBankOrUpi) {
+        // Ensure bank statement & UPI transactions are strictly Receipt (Money in / CR) or Payment (Money out / DR), never Purchase/Sales
+        const typeLower = (entry.type || '').toLowerCase();
+        if (typeLower === 'sales' || typeLower === 'receipt' || typeLower === 'cr' || typeLower === 'credit') {
+            entry.type = 'receipt';
+        } else if (typeLower === 'contra') {
+            entry.type = 'contra';
+        } else if (typeLower === 'journal') {
+            entry.type = 'journal';
+        } else {
+            entry.type = 'payment';
+        }
+
+        console.log(`[SYNC] Handling bank/UPI voucher: ${entry.type.toUpperCase()} (${entry.invoiceNumber})`);
         try {
             // 1. Fetch current Tally ledger list
             const masterData = await getLedgerList(entry.companyName);
