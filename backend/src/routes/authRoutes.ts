@@ -123,7 +123,8 @@ router.post('/signup', authenticateToken, isAdmin, async (req, res) => {
 
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = await User.findOne({ email });
+  const cleanEmail = (email || '').trim();
+  const user = await User.findOne({ email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }

@@ -4,7 +4,7 @@ const axios = require('axios');
  * CONFIGURATION
  */
 const CONFIG = {
-    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:3000',
+    BACKEND_URL: process.env.BACKEND_URL || 'https://photobill-backend-1020363630918.asia-south1.run.app',
     TALLY_URL: process.env.TALLY_URL || 'http://127.0.0.1:9000',
     EMAIL: process.env.AGENT_EMAIL || 'pankaj@photoBill.com',
     PASSWORD: process.env.AGENT_PASSWORD || 'pankaj@9999',
