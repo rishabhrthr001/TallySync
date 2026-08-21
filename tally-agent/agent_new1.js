@@ -1255,9 +1255,20 @@ async function syncEntry(entry) {
                     await upsertLedger(entry.companyName, exactName, led.group, led.gstin, true); // Alter
                 }
             } else {
-                console.log(`[LEDGER] Not found in Tally, creating: "${led.name}"`);
-                await upsertLedger(entry.companyName, led.name, led.group, led.gstin, false); // Create
-                resolvedNames[led.name] = led.name;
+                console.log(`[LEDGER] Party/Ledger not found in Tally, creating: "${led.name}" (${led.group}, GST: ${led.gstin || 'Unregistered'})`);
+                const created = await upsertLedger(entry.companyName, led.name, led.group, led.gstin, false); // Create
+                if (created) {
+                    resolvedNames[led.name] = led.name;
+                } else {
+                    console.warn(`[LEDGER] ⚠️ Unable to create ledger "${led.name}". Falling back to Suspense for this party.`);
+                    if (['Sundry Debtors','Sundry Creditors'].includes(led.group)) {
+                        await upsertLedger(entry.companyName, 'Suspense A/c', 'Suspense Accounts', '', false);
+                        resolvedNames[led.name] = 'Suspense A/c';
+                        entry.notes = `[Fallback to Suspense - Party Ledger Creation Failed] Party: ${led.name} | GSTIN: ${led.gstin || 'N/A'}\n${entry.notes || ''}`.trim();
+                    } else {
+                        resolvedNames[led.name] = led.name;
+                    }
+                }
             }
         }
 

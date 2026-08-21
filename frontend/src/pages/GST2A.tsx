@@ -12,6 +12,28 @@ import { formatCurrency } from '../utils/format';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 
+const STATE_CODE_TO_NAME: { [code: string]: string } = {
+  '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh',
+  '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan',
+  '09': 'Uttar Pradesh', '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh',
+  '13': 'Nagaland', '14': 'Manipur', '15': 'Mizoram', '16': 'Tripura',
+  '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal', '20': 'Jharkhand',
+  '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat',
+  '26': 'Dadra & Nagar Haveli', '27': 'Maharashtra', '29': 'Karnataka',
+  '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu',
+  '34': 'Puducherry', '35': 'Andaman & Nicobar', '36': 'Telangana',
+  '37': 'Andhra Pradesh', '38': 'Ladakh', '97': 'Other Territory'
+};
+
+interface LineItem {
+  name: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  hsn?: string;
+  unit?: string;
+}
+
 interface Entry {
   _id: string;
   type: string;
@@ -24,6 +46,8 @@ interface Entry {
   totalAmount: number;
   gstType: 'cgst-sgst' | 'igst';
   status: 'pending' | 'success' | 'failed';
+  items?: LineItem[];
+  notes?: string;
 }
 
 interface PortalBill {
@@ -31,8 +55,14 @@ interface PortalBill {
   date: string;
   partyGstin: string;
   partyName: string;
+  state?: string;
+  pos?: string;
+  rate: number;
   taxableAmount: number;
   taxAmount: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
   totalAmount: number;
   gstType: 'cgst-sgst' | 'igst';
 }
@@ -169,21 +199,31 @@ const GST2A = () => {
     });
   }, [portalBills, timeFilter, dateBoundaries, searchQuery]);
 
+  const companyState = useMemo(() => {
+    return (user?.gstin || '08').trim().substring(0, 2);
+  }, [user?.gstin]);
+
   const summary = useMemo(() => {
     return filteredEntries.reduce(
       (acc, e) => {
-        acc.taxableValue += e.taxableAmount || 0;
-        if (e.gstType === 'igst') {
-          acc.igst += e.taxAmount || 0;
+        const partyState = (e.partyGstin || '').trim().substring(0, 2);
+        const isSameState = partyState ? partyState === companyState : e.gstType !== 'igst';
+        const taxAmt = Number(e.taxAmount || 0);
+        const taxable = Number(e.taxableAmount || (e.totalAmount ? e.totalAmount - taxAmt : 0));
+
+        acc.taxableValue += taxable;
+        if (!isSameState) {
+          acc.igst += taxAmt > 0 ? taxAmt : taxable * 0.18;
         } else {
-          acc.cgst += (e.taxAmount || 0) / 2;
-          acc.sgst += (e.taxAmount || 0) / 2;
+          const half = taxAmt > 0 ? taxAmt / 2 : taxable * 0.09;
+          acc.cgst += half;
+          acc.sgst += half;
         }
         return acc;
       },
       { taxableValue: 0, cgst: 0, sgst: 0, igst: 0 }
     );
-  }, [filteredEntries]);
+  }, [filteredEntries, companyState]);
 
   // Sync to Tally
   const handleSync = async () => {
@@ -260,8 +300,11 @@ const GST2A = () => {
 
       if (b2bArray && Array.isArray(b2bArray)) {
         b2bArray.forEach((supplier: any) => {
-          const ctin = supplier.ctin || '';
-          const name = supplier.tradeName || supplier.lgnm || `Supplier (${ctin})`;
+          const ctin = (supplier.ctin || '').trim().toUpperCase();
+          const partyState = ctin.substring(0, 2);
+          const stateName = STATE_CODE_TO_NAME[partyState] || '';
+          const name = (supplier.tradeName || supplier.lgnm || supplier.cname || supplier.legalName || supplier.name || '').trim() || (ctin ? `Supplier (${ctin})` : 'Supplier');
+          
           if (Array.isArray(supplier.inv)) {
             supplier.inv.forEach((inv: any) => {
               let formattedDate = inv.idt || '';
@@ -270,42 +313,132 @@ const GST2A = () => {
                 formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
               }
 
+              const pos = inv.pos || inv.placeOfSupply || (partyState ? `${partyState}-${stateName}` : '');
+              const posCode = String(pos || '').trim().substring(0, 2);
+              const isSameState = partyState ? partyState === companyState : (posCode ? posCode === companyState : true);
+
               let txval = 0;
-              let taxAmt = 0;
+              let rawCgst = 0;
+              let rawSgst = 0;
+              let rawIgst = 0;
+              let itemRate = 0;
+
               if (Array.isArray(inv.itms)) {
                 inv.itms.forEach((itm: any) => {
                   const det = itm.itm_det || itm;
                   if (det) {
                     txval += Number(det.txval || 0);
-                    taxAmt += Number(det.iamt || det.igst || 0) + Number(det.camt || det.cgst || 0) + Number(det.samt || det.sgst || 0);
+                    rawIgst += Number(det.iamt || det.igst || 0);
+                    rawCgst += Number(det.camt || det.cgst || 0);
+                    rawSgst += Number(det.samt || det.sgst || 0);
+                    if (det.rt != null && !isNaN(Number(det.rt)) && Number(det.rt) > 0) {
+                      itemRate = Number(det.rt);
+                    }
                   }
                 });
               }
+
+              const taxableAmount = txval || (Number(inv.val || 0) - (rawIgst + rawCgst + rawSgst));
+              let rate = itemRate;
+              if (!rate) {
+                const totalTax = rawIgst + rawCgst + rawSgst;
+                rate = totalTax > 0 && taxableAmount > 0 ? Math.round((totalTax / taxableAmount) * 100) : 18;
+              }
+
+              let cgst = 0;
+              let sgst = 0;
+              let igst = 0;
+              let taxAmount = 0;
+
+              if (isSameState) {
+                cgst = rawCgst > 0 ? rawCgst : (taxableAmount * (rate / 2)) / 100;
+                sgst = rawSgst > 0 ? rawSgst : (taxableAmount * (rate / 2)) / 100;
+                igst = 0;
+                taxAmount = cgst + sgst;
+              } else {
+                igst = rawIgst > 0 ? rawIgst : (taxableAmount * rate) / 100;
+                cgst = 0;
+                sgst = 0;
+                taxAmount = igst;
+              }
+
+              const totalAmount = Number(inv.val || (taxableAmount + taxAmount));
 
               extracted.push({
                 invoiceNumber: inv.inum || '',
                 date: formattedDate,
                 partyGstin: ctin,
                 partyName: name,
-                taxableAmount: txval || (Number(inv.val || 0) - taxAmt),
-                taxAmount: taxAmt,
-                totalAmount: Number(inv.val || 0),
-                gstType: taxAmt > 0 && (inv.itms?.[0]?.itm_det?.iamt > 0 || inv.itms?.[0]?.iamt > 0) ? 'igst' : 'cgst-sgst'
+                state: stateName,
+                pos: String(pos),
+                rate: rate,
+                taxableAmount: Number(taxableAmount.toFixed(2)),
+                taxAmount: Number(taxAmount.toFixed(2)),
+                cgst: Number(cgst.toFixed(2)),
+                sgst: Number(sgst.toFixed(2)),
+                igst: Number(igst.toFixed(2)),
+                totalAmount: Number(totalAmount.toFixed(2)),
+                gstType: isSameState ? 'cgst-sgst' : 'igst'
               });
             });
           }
         });
       } else if (Array.isArray(data)) {
-        extracted = data.map((item: any) => ({
-          invoiceNumber: item.invoiceNumber || item.inum || item.invoice_no || '',
-          date: item.date || item.idt || '',
-          partyGstin: item.partyGstin || item.ctin || item.gstin || '',
-          partyName: item.partyName || item.tradeName || item.supplierName || 'Unknown',
-          taxableAmount: Number(item.taxableAmount || item.txval || 0),
-          taxAmount: Number(item.taxAmount || item.tax_amount || 0),
-          totalAmount: Number(item.totalAmount || item.val || 0),
-          gstType: item.gstType || 'cgst-sgst'
-        }));
+        extracted = data.map((item: any) => {
+          const gstin = (item.partyGstin || item.ctin || item.gstin || '').trim().toUpperCase();
+          const partyState = gstin.substring(0, 2);
+          const stateName = STATE_CODE_TO_NAME[partyState] || '';
+          const pos = item.pos || item.placeOfSupply || (partyState ? `${partyState}-${stateName}` : '');
+          const posCode = String(pos || '').trim().substring(0, 2);
+          const isSameState = partyState ? partyState === companyState : (posCode ? posCode === companyState : true);
+          
+          const taxableAmount = Number(item.taxableAmount || item.txval || 0);
+          let rate = Number(item.rate || item.taxRate || 0);
+          let rawIgst = Number(item.igst || item.iamt || 0);
+          let rawCgst = Number(item.cgst || item.camt || 0);
+          let rawSgst = Number(item.sgst || item.samt || 0);
+          const explicitTax = rawIgst + rawCgst + rawSgst || Number(item.taxAmount || 0);
+
+          if (!rate) {
+            rate = explicitTax > 0 && taxableAmount > 0 ? Math.round((explicitTax / taxableAmount) * 100) : 18;
+          }
+
+          let cgst = 0;
+          let sgst = 0;
+          let igst = 0;
+          let taxAmount = 0;
+
+          if (isSameState) {
+            cgst = rawCgst > 0 ? rawCgst : (taxableAmount * (rate / 2)) / 100;
+            sgst = rawSgst > 0 ? rawSgst : (taxableAmount * (rate / 2)) / 100;
+            igst = 0;
+            taxAmount = cgst + sgst;
+          } else {
+            igst = rawIgst > 0 ? rawIgst : (taxableAmount * rate) / 100;
+            cgst = 0;
+            sgst = 0;
+            taxAmount = igst;
+          }
+
+          const totalAmount = Number(item.totalAmount || item.val || (taxableAmount + taxAmount));
+
+          return {
+            invoiceNumber: item.invoiceNumber || item.inum || item.invoice_no || '',
+            date: item.date || item.idt || '',
+            partyGstin: gstin,
+            partyName: item.partyName || item.tradeName || item.supplierName || 'Unknown',
+            state: stateName,
+            pos: String(pos),
+            rate: rate,
+            taxableAmount: Number(taxableAmount.toFixed(2)),
+            taxAmount: Number(taxAmount.toFixed(2)),
+            cgst: Number(cgst.toFixed(2)),
+            sgst: Number(sgst.toFixed(2)),
+            igst: Number(igst.toFixed(2)),
+            totalAmount: Number(totalAmount.toFixed(2)),
+            gstType: isSameState ? 'cgst-sgst' : 'igst'
+          };
+        });
       } else {
         throw new Error('Unrecognized GSTR JSON structure. Paste official GSTR return data.');
       }
@@ -330,7 +463,7 @@ const GST2A = () => {
     }
   };
 
-  // Excel parsing logic
+  // Excel parsing logic with SheetJS CE
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -340,25 +473,28 @@ const GST2A = () => {
     reader.onload = (evt) => {
       try {
         const data = evt.target?.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
+        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
         
-        const sheetName = workbook.SheetNames.find(n => 
-          n.toLowerCase().includes('b2b') || n.toLowerCase().includes('invoice')
-        ) || workbook.SheetNames[0];
+        // Find relevant sheet (b2b, b2ba, invoice, or first sheet)
+        const sheetName = workbook.SheetNames.find(n => {
+          const lower = n.toLowerCase();
+          return lower.includes('b2b') || lower.includes('invoice') || lower.includes('gstr');
+        }) || workbook.SheetNames[0];
         
         const worksheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[];
         
         if (rows.length === 0) {
           throw new Error('Workbook is empty.');
         }
 
         let headerIdx = -1;
-        for (let i = 0; i < Math.min(rows.length, 15); i++) {
+        for (let i = 0; i < Math.min(rows.length, 25); i++) {
           const row = rows[i];
           if (Array.isArray(row)) {
-            const hasGstin = row.some(cell => String(cell).toLowerCase().includes('gstin') || String(cell).toLowerCase().includes('ctin'));
-            const hasInv = row.some(cell => String(cell).toLowerCase().includes('invoice') || String(cell).toLowerCase().includes('inv'));
+            const rowStr = row.map(cell => String(cell || '').toLowerCase()).join(' ');
+            const hasGstin = rowStr.includes('gstin') || rowStr.includes('ctin') || rowStr.includes('supplier');
+            const hasInv = rowStr.includes('invoice') || rowStr.includes('inv') || rowStr.includes('taxable');
             if (hasGstin && hasInv) {
               headerIdx = i;
               break;
@@ -372,15 +508,17 @@ const GST2A = () => {
         
         const findCol = (keys: string[]) => headers.findIndex(h => keys.some(k => h.includes(k)));
         
-        const gstinIdx = findCol(['gstin', 'ctin', 'supplier gstin', 'supplier\'s gstin']);
-        const nameIdx = findCol(['supplier name', 'trade name', 'legal name', 'supplier', 'trade/legal']);
-        const invIdx = findCol(['invoice number', 'invoice no', 'inv no', 'number', 'inum']);
+        const gstinIdx = findCol(['gstin of supplier', 'supplier gstin', 'gstin', 'ctin', "supplier's gstin"]);
+        const nameIdx = findCol(['trade/legal name', 'legal name', 'trade name', 'supplier name', 'name of supplier', 'party name', 'supplier', 'cname']);
+        const invIdx = findCol(['invoice number', 'invoice no', 'inv no', 'inum', 'invoice no.']);
         const dateIdx = findCol(['invoice date', 'date', 'idt', 'inv date']);
-        const totalIdx = findCol(['invoice value', 'total amount', 'val', 'invoice value(₹)', 'amount', 'total val']);
-        const taxableIdx = findCol(['taxable value', 'taxable amount', 'txval', 'taxable val']);
-        const igstIdx = findCol(['igst', 'integrated tax', 'iamt']);
-        const cgstIdx = findCol(['cgst', 'central tax', 'camt']);
-        const sgstIdx = findCol(['sgst', 'state tax', 'samt']);
+        const totalIdx = findCol(['invoice value', 'invoice value (₹)', 'invoice value(₹)', 'val', 'total amount', 'invoice amount']);
+        const posIdx = findCol(['place of supply', 'place of supply (pos)', 'place of supply(pos)', 'pos', 'state name', 'state']);
+        const rateIdx = findCol(['rate', 'rate (%)', 'rate(%)', 'tax rate', 'gst rate', 'applicable % of tax rate']);
+        const taxableIdx = findCol(['taxable value', 'taxable value (₹)', 'taxable value(₹)', 'taxable val', 'txval', 'taxable amount']);
+        const igstIdx = findCol(['integrated tax', 'integrated tax (₹)', 'integrated tax(₹)', 'igst', 'iamt']);
+        const cgstIdx = findCol(['central tax', 'central tax (₹)', 'central tax(₹)', 'cgst', 'camt']);
+        const sgstIdx = findCol(['state/ut tax', 'state tax', 'state tax (₹)', 'state tax(₹)', 'state/ut tax (₹)', 'sgst', 'samt', 'utgst']);
 
         const extracted: PortalBill[] = [];
 
@@ -388,69 +526,115 @@ const GST2A = () => {
           const row = rows[i];
           if (!Array.isArray(row) || row.length === 0) continue;
           
-          const gstin = gstinIdx !== -1 ? String(row[gstinIdx] || '').trim() : '';
+          const gstin = gstinIdx !== -1 ? String(row[gstinIdx] || '').trim().toUpperCase() : '';
           const invNum = invIdx !== -1 ? String(row[invIdx] || '').trim() : '';
           
-          if (!gstin || !invNum || invNum.toLowerCase().includes('total')) continue;
+          if (!gstin || !invNum || invNum.toLowerCase().includes('total') || gstin.toLowerCase().includes('total')) continue;
           
-          const name = nameIdx !== -1 ? String(row[nameIdx] || '').trim() : `Supplier (${gstin})`;
+          const rawName = nameIdx !== -1 ? String(row[nameIdx] || '').trim() : '';
+          const name = rawName || `Supplier (${gstin})`;
           
+          // Place of Supply / State detection
+          const rawPos = posIdx !== -1 ? String(row[posIdx] || '').trim() : '';
+          const partyState = gstin.length >= 2 ? gstin.substring(0, 2) : '';
+          const stateName = STATE_CODE_TO_NAME[partyState] || rawPos || '';
+          const pos = rawPos || (partyState ? `${partyState}-${stateName}` : '');
+
+          // Date formatting
           let rawDate = dateIdx !== -1 ? row[dateIdx] : '';
           let dateStr = '';
-          if (rawDate) {
-            if (typeof rawDate === 'number') {
-              const dateObj = new Date((rawDate - 25569) * 86400 * 1000);
-              dateStr = dateObj.toISOString().split('T')[0];
-            } else {
-              const cleanD = String(rawDate).trim();
-              const p = cleanD.split(/[-/]/);
-              if (p.length === 3) {
-                if (p[2].length === 4) {
-                  dateStr = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-                } else if (p[0].length === 4) {
-                  dateStr = `${p[0]}-${p[1].padStart(2, '0')}-${p[2].padStart(2, '0')}`;
-                }
+          if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+            dateStr = rawDate.toISOString().split('T')[0];
+          } else if (typeof rawDate === 'number') {
+            const dateObj = new Date((rawDate - 25569) * 86400 * 1000);
+            dateStr = dateObj.toISOString().split('T')[0];
+          } else if (rawDate) {
+            const cleanD = String(rawDate).trim();
+            const p = cleanD.split(/[-/]/);
+            if (p.length === 3) {
+              if (p[2].length === 4) {
+                dateStr = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+              } else if (p[0].length === 4) {
+                dateStr = `${p[0]}-${p[1].padStart(2, '0')}-${p[2].padStart(2, '0')}`;
               }
             }
           }
-          
           if (!dateStr) dateStr = new Date().toISOString().split('T')[0];
 
           const totalVal = totalIdx !== -1 ? Number(row[totalIdx] || 0) : 0;
           const taxableVal = taxableIdx !== -1 ? Number(row[taxableIdx] || 0) : totalVal;
-          const igst = igstIdx !== -1 ? Number(row[igstIdx] || 0) : 0;
-          const cgst = cgstIdx !== -1 ? Number(row[cgstIdx] || 0) : 0;
-          const sgst = sgstIdx !== -1 ? Number(row[sgstIdx] || 0) : 0;
+          const rawIgst = igstIdx !== -1 ? Number(row[igstIdx] || 0) : 0;
+          const rawCgst = cgstIdx !== -1 ? Number(row[cgstIdx] || 0) : 0;
+          const rawSgst = sgstIdx !== -1 ? Number(row[sgstIdx] || 0) : 0;
+          const explicitTax = rawIgst + rawCgst + rawSgst;
+
+          // Rate calculation
+          let rate = rateIdx !== -1 && row[rateIdx] != null && !isNaN(Number(row[rateIdx])) && Number(row[rateIdx]) > 0
+            ? Number(row[rateIdx])
+            : 0;
+
+          if (!rate) {
+            if (explicitTax > 0 && taxableVal > 0) {
+              rate = Math.round((explicitTax / taxableVal) * 100);
+            } else {
+              rate = 18;
+            }
+          }
+
+          // State matching
+          const isSameState = partyState ? partyState === companyState : (rawIgst === 0 && (rawCgst > 0 || rawSgst > 0));
           
-          const taxVal = igst || (cgst + sgst);
-          const gstType = igst > 0 ? 'igst' : 'cgst-sgst';
+          let cgst = 0;
+          let sgst = 0;
+          let igst = 0;
+          let finalTax = 0;
+
+          if (isSameState) {
+            cgst = rawCgst > 0 ? rawCgst : (taxableVal * (rate / 2)) / 100;
+            sgst = rawSgst > 0 ? rawSgst : (taxableVal * (rate / 2)) / 100;
+            igst = 0;
+            finalTax = cgst + sgst;
+          } else {
+            igst = rawIgst > 0 ? rawIgst : (taxableVal * rate) / 100;
+            cgst = 0;
+            sgst = 0;
+            finalTax = igst;
+          }
+
+          const finalTotal = totalVal > 0 ? totalVal : (taxableVal + finalTax);
 
           extracted.push({
             invoiceNumber: invNum,
             date: dateStr,
             partyGstin: gstin,
             partyName: name,
-            taxableAmount: taxableVal,
-            taxAmount: taxVal,
-            totalAmount: totalVal || (taxableVal + taxVal),
-            gstType
+            state: stateName,
+            pos: pos,
+            rate: rate,
+            taxableAmount: Number(taxableVal.toFixed(2)),
+            taxAmount: Number(finalTax.toFixed(2)),
+            cgst: Number(cgst.toFixed(2)),
+            sgst: Number(sgst.toFixed(2)),
+            igst: Number(igst.toFixed(2)),
+            totalAmount: Number(finalTotal.toFixed(2)),
+            gstType: isSameState ? 'cgst-sgst' : 'igst'
           });
         }
 
         if (extracted.length === 0) {
-          throw new Error('No invoices detected. Check headers.');
+          throw new Error('No invoices detected. Please check sheet columns.');
         }
 
         setPortalBills(extracted);
         setSelectedMissingInvoices([]);
         addToast({
-          title: 'Excel Upload Completed',
-          message: `Imported ${extracted.length} invoices.`,
+          title: 'SheetJS Excel Upload Success',
+          message: `Parsed ${extracted.length} GSTR-2A purchase vouchers with exact rates and state tax breakdown.`,
           type: 'success'
         });
       } catch (err: any) {
         addToast({
-          title: 'Import Failed',
+          title: 'Excel Import Failed',
           message: err.message,
           type: 'error'
         });
@@ -806,15 +990,24 @@ const GST2A = () => {
                 <span className="text-xl font-black text-slate-800 font-mono">{formatCurrency(summary.taxableValue)}</span>
               </div>
               <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-xs flex flex-col gap-2">
-                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total CGST</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total CGST</span>
+                  <span className="text-[9px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">9%</span>
+                </div>
                 <span className="text-xl font-black text-slate-800 font-mono">{formatCurrency(summary.cgst)}</span>
               </div>
               <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-xs flex flex-col gap-2">
-                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total SGST</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total SGST</span>
+                  <span className="text-[9px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">9%</span>
+                </div>
                 <span className="text-xl font-black text-slate-800 font-mono">{formatCurrency(summary.sgst)}</span>
               </div>
               <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-xs flex flex-col gap-2">
-                <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total IGST</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total IGST</span>
+                  <span className="text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded">18%</span>
+                </div>
                 <span className="text-xl font-black text-slate-800 font-mono">{formatCurrency(summary.igst)}</span>
               </div>
             </div>
@@ -836,47 +1029,112 @@ const GST2A = () => {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50/80 border-b border-slate-200">
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">Date</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">Invoice No.</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">Supplier Name</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">GSTIN</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">Taxable</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">CGST</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">SGST</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">IGST</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">Total</th>
-                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-center">Status</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">Date</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">Invoice No.</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">Supplier Name</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">GSTIN</th>
+                        {withItems && (
+                          <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider">Item Details & Breakdown</th>
+                        )}
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">Taxable</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">CGST (9%)</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">SGST (9%)</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">IGST (18%)</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-right">Total Price</th>
+                        <th className="px-5 py-4 text-[10px] font-black uppercase text-slate-400 tracking-wider text-center">Status</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {filteredEntries.map(e => (
-                        <tr key={e._id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
-                          <td className="px-6 py-4 text-xs font-bold text-slate-655">
-                            {new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </td>
-                          <td className="px-6 py-4 text-xs font-black text-slate-900">{e.invoiceNumber || 'N/A'}</td>
-                          <td className="px-6 py-4 text-xs font-bold text-slate-800 max-w-[200px] truncate">{e.partyName}</td>
-                          <td className="px-6 py-4">
-                            {e.partyGstin ? (
-                              <span className="text-xs font-bold font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{e.partyGstin}</span>
-                            ) : (
-                              <span className="text-xs font-bold text-slate-400 italic">N/A</span>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      {filteredEntries.map(e => {
+                        const partyState = (e.partyGstin || '').trim().substring(0, 2);
+                        const isSameState = partyState ? partyState === companyState : e.gstType !== 'igst';
+                        const taxAmt = Number(e.taxAmount || 0);
+                        const taxable = Number(e.taxableAmount || (e.totalAmount ? e.totalAmount - taxAmt : 0));
+                        const cgstVal = isSameState ? (taxAmt > 0 ? taxAmt / 2 : taxable * 0.09) : 0;
+                        const sgstVal = isSameState ? (taxAmt > 0 ? taxAmt / 2 : taxable * 0.09) : 0;
+                        const igstVal = !isSameState ? (taxAmt > 0 ? taxAmt : taxable * 0.18) : 0;
+
+                        return (
+                          <tr key={e._id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-5 py-4 text-xs font-bold text-slate-650 align-top whitespace-nowrap">
+                              {new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </td>
+                            <td className="px-5 py-4 text-xs font-black text-slate-900 align-top whitespace-nowrap">{e.invoiceNumber || 'N/A'}</td>
+                            <td className="px-5 py-4 text-xs font-bold text-slate-800 max-w-[180px] truncate align-top">{e.partyName}</td>
+                            <td className="px-5 py-4 align-top">
+                              {e.partyGstin ? (
+                                <span className="text-xs font-bold font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{e.partyGstin}</span>
+                              ) : (
+                                <span className="text-xs font-bold text-slate-400 italic">N/A</span>
+                              )}
+                            </td>
+                            {withItems && (
+                              <td className="px-5 py-3.5 align-top">
+                                {e.items && e.items.length > 0 ? (
+                                  <div className="space-y-1.5 min-w-[240px] max-w-sm">
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                        {e.items.length} Item{e.items.length > 1 ? 's' : ''}
+                                      </span>
+                                    </div>
+                                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                                      {e.items.map((item, iIdx) => (
+                                        <div key={iIdx} className="flex items-center justify-between gap-2 p-1.5 bg-slate-50 border border-slate-200/80 rounded-lg text-xs">
+                                          <div className="flex flex-col overflow-hidden">
+                                            <span className="font-bold text-slate-800 truncate" title={item.name}>{item.name}</span>
+                                            {item.hsn && <span className="text-[9px] text-slate-400 font-mono">HSN: {item.hsn}</span>}
+                                          </div>
+                                          <div className="flex items-center gap-1.5 font-mono text-[11px] whitespace-nowrap text-right">
+                                            <span className="text-slate-500 font-semibold">{item.quantity} {item.unit || 'Nos'} × ₹{item.rate}</span>
+                                            <span className="font-black text-slate-900">= {formatCurrency(item.amount)}</span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-xs text-slate-400 italic py-1">
+                                    No item details (Single Total Price: {formatCurrency(e.totalAmount || 0)})
+                                  </div>
+                                )}
+                              </td>
                             )}
-                          </td>
-                          <td className="px-6 py-4 text-xs font-black text-slate-850 font-mono text-right">{formatCurrency(e.taxableAmount || 0)}</td>
-                          <td className="px-6 py-4 text-xs font-bold text-slate-600 font-mono text-right">
-                            {e.gstType !== 'igst' ? formatCurrency((e.taxAmount || 0) / 2) : '-'}
-                          </td>
-                          <td className="px-6 py-4 text-xs font-bold text-slate-600 font-mono text-right">
-                            {e.gstType !== 'igst' ? formatCurrency((e.taxAmount || 0) / 2) : '-'}
-                          </td>
-                          <td className="px-6 py-4 text-xs font-bold text-slate-600 font-mono text-right">
-                            {e.gstType === 'igst' ? formatCurrency(e.taxAmount || 0) : '-'}
-                          </td>
-                          <td className="px-6 py-4 text-sm font-black text-indigo-650 font-mono text-right">{formatCurrency(e.totalAmount || 0)}</td>
-                          <td className="px-6 py-4 text-center">{getStatusBadge(e.status)}</td>
-                        </tr>
-                      ))}
+                            <td className="px-5 py-4 text-xs font-black text-slate-850 font-mono text-right align-top">{formatCurrency(taxable)}</td>
+                            <td className="px-5 py-4 text-xs font-bold text-slate-600 font-mono text-right align-top">
+                              {isSameState ? (
+                                <div>
+                                  <span>{formatCurrency(cgstVal)}</span>
+                                  <span className="block text-[9px] text-emerald-600 font-bold">9%</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-300">-</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-4 text-xs font-bold text-slate-600 font-mono text-right align-top">
+                              {isSameState ? (
+                                <div>
+                                  <span>{formatCurrency(sgstVal)}</span>
+                                  <span className="block text-[9px] text-emerald-600 font-bold">9%</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-300">-</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-4 text-xs font-bold text-slate-600 font-mono text-right align-top">
+                              {!isSameState ? (
+                                <div>
+                                  <span>{formatCurrency(igstVal)}</span>
+                                  <span className="block text-[9px] text-indigo-600 font-bold">18%</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-300">-</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-4 text-sm font-black text-indigo-650 font-mono text-right align-top whitespace-nowrap">{formatCurrency(e.totalAmount || (taxable + (isSameState ? cgstVal + sgstVal : igstVal)))}</td>
+                            <td className="px-5 py-4 text-center align-top whitespace-nowrap">{getStatusBadge(e.status)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1107,13 +1365,37 @@ const GST2A = () => {
                                     <div className="text-[10px] font-semibold text-slate-450 mt-0.5">
                                       {new Date(b.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                                     </div>
+                                    {b.pos && (
+                                      <div className="mt-1">
+                                        <span className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
+                                          POS: {b.pos}
+                                        </span>
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="px-4 py-4 bg-indigo-50/5">
-                                    <div className="font-bold text-slate-800 truncate max-w-[140px]" title={b.partyName}>{b.partyName}</div>
+                                    <div className="font-bold text-slate-800 truncate max-w-[150px]" title={b.partyName}>{b.partyName}</div>
                                     <div className="text-[10px] font-mono text-slate-500 mt-0.5">{b.partyGstin}</div>
+                                    <div className="flex items-center gap-1.5 mt-1">
+                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${
+                                        b.gstType === 'cgst-sgst' 
+                                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                          : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                      }`}>
+                                        {b.rate}% {b.gstType === 'cgst-sgst' ? 'CGST+SGST' : 'IGST'}
+                                      </span>
+                                    </div>
                                   </td>
-                                  <td className="px-4 py-4 text-right border-r border-slate-100 font-mono font-black text-slate-800 bg-indigo-50/5">
-                                    {formatCurrency(b.totalAmount)}
+                                  <td className="px-4 py-4 text-right border-r border-slate-100 font-mono bg-indigo-50/5">
+                                    <div className="font-black text-slate-900 text-sm">{formatCurrency(b.totalAmount)}</div>
+                                    <div className="text-[10px] text-slate-500 font-semibold mt-0.5">Taxable: {formatCurrency(b.taxableAmount)}</div>
+                                    <div className="text-[9px] text-slate-400 mt-0.5">
+                                      {b.gstType === 'cgst-sgst' ? (
+                                        <span>CGST: {formatCurrency(b.cgst)} | SGST: {formatCurrency(b.sgst)}</span>
+                                      ) : (
+                                        <span>IGST: {formatCurrency(b.igst)}</span>
+                                      )}
+                                    </div>
                                   </td>
 
                                   {/* TallySync Matches details */}

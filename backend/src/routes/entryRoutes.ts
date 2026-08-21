@@ -284,7 +284,13 @@ router.get('/', authenticateToken, async (req: any, res) => {
         };
       });
     } else {
-      entries = await Entry.find({ companyName: req.user.companyName }).sort({ createdAt: -1 });
+      const compRegex = new RegExp(`^${(req.user.companyName || '').trim()}$`, 'i');
+      entries = await Entry.find({
+        $or: [
+          { companyName: compRegex },
+          { userId: req.user.id }
+        ]
+      }).sort({ createdAt: -1 });
     }
     res.json(entries);
   } catch (error: any) {
@@ -848,12 +854,37 @@ router.post('/reconciled-bulk', authenticateToken, checkDailyBillLimit, async (r
   const createdEntries = [];
 
   try {
+    // Pre-fetch existing ledgers for this company to match by GSTIN or name
+    const existingLedgers = await Ledger.find({ companyName: req.user.companyName });
+
     for (const e of entries) {
-      const refNum = e.invoiceNumber || `PUR-${Math.floor(Math.random() * 9000000000) + 1000000000}`;
+      const refNum = (e.invoiceNumber || `PUR-${Math.floor(Math.random() * 9000000000) + 1000000000}`).trim();
       const dateStr = e.date || new Date().toISOString().split('T')[0];
       const totalAmt = Number(e.totalAmount || 0);
       const taxableAmt = Number(e.taxableAmount || totalAmt);
       const taxAmt = Number(e.taxAmount || 0);
+      const rawGstin = (e.partyGstin || '').trim().toUpperCase();
+      let rawPartyName = (e.partyName || '').trim();
+
+      // Resolve party name via GSTIN or existing ledger
+      let cleanPartyName = rawPartyName;
+      if (rawGstin) {
+        const matchByGstin = existingLedgers.find(l => l.gstin && l.gstin.trim().toUpperCase() === rawGstin);
+        if (matchByGstin && matchByGstin.partyName) {
+          cleanPartyName = matchByGstin.partyName;
+        }
+      }
+
+      if (!cleanPartyName || cleanPartyName.toLowerCase().startsWith('supplier (')) {
+        cleanPartyName = rawGstin ? `Supplier (${rawGstin})` : 'Sundry Creditors';
+      }
+
+      // Title case if raw name was ALL CAPS
+      if (cleanPartyName === cleanPartyName.toUpperCase() && cleanPartyName.length > 4 && !cleanPartyName.startsWith('Supplier (')) {
+        cleanPartyName = cleanPartyName
+          .toLowerCase()
+          .replace(/\b\w/g, char => char.toUpperCase());
+      }
       
       const idempotencyKey = `${req.user.companyName}-${refNum}-${totalAmt}-${dateStr}`;
 
@@ -864,50 +895,78 @@ router.post('/reconciled-bulk', authenticateToken, checkDailyBillLimit, async (r
         continue;
       }
 
-      // Default item
-      const gstRate = taxableAmt > 0 && taxAmt > 0 ? Math.round((taxAmt / taxableAmt) * 100) : 18;
+      // Determine GST rate & type
+      const gstRate = e.rate || (taxableAmt > 0 && taxAmt > 0 ? Math.round((taxAmt / taxableAmt) * 100) : 18);
+      
+      let determinedGstType: 'cgst-sgst' | 'igst' = e.gstType || 'cgst-sgst';
+      if (rawGstin && rawGstin.length >= 2) {
+        const partyStateCode = rawGstin.substring(0, 2);
+        const compGstin = (req.user.gstin || '').trim().toUpperCase();
+        if (compGstin && compGstin.length >= 2) {
+          const compStateCode = compGstin.substring(0, 2);
+          determinedGstType = partyStateCode === compStateCode ? 'cgst-sgst' : 'igst';
+        }
+      }
+
       const defaultItem = {
-        name: `Supply of Goods / Services (Purchase)`,
+        name: `Supply of Goods / Services (${cleanPartyName})`,
         quantity: 1,
         rate: taxableAmt,
         amount: taxableAmt,
         gst: gstRate,
         hsn: '9983',
-        unit: 'NOS'
+        unit: 'Nos'
       };
 
       const newEntry = new Entry({
         userId: req.user.id,
         companyName: req.user.companyName,
         type: 'purchase',
-        partyName: e.partyName || 'Cash Purchase',
-        partyGstin: e.partyGstin || '',
+        partyName: cleanPartyName,
+        partyGstin: rawGstin,
         invoiceNumber: refNum,
         date: dateStr,
         items: [defaultItem],
         taxableAmount: taxableAmt,
         taxAmount: taxAmt,
         totalAmount: totalAmt,
-        gstType: e.gstType || 'cgst-sgst',
+        gstType: determinedGstType,
         status: 'pending',
-        notes: e.notes || 'Auto-imported from GSTR-2A/2B Reconciliation',
+        notes: e.notes || `Auto-imported from GSTR-2A/2B Reconciliation | GSTIN: ${rawGstin || 'Unregistered'}`,
         idempotencyKey
       });
 
       await newEntry.save();
       createdEntries.push(newEntry);
 
-      // Update/Create Ledger
+      // Create / Update Ledger with full GST details
+      const stateMap: { [code: string]: string } = {
+        '01': 'Jammu and Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh',
+        '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan',
+        '09': 'Uttar Pradesh', '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh',
+        '13': 'Nagaland', '14': 'Manipur', '15': 'Mizoram', '16': 'Tripura',
+        '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal', '20': 'Jharkhand',
+        '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat',
+        '26': 'Dadra and Nagar Haveli and Daman and Diu', '27': 'Maharashtra', '29': 'Karnataka',
+        '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu',
+        '34': 'Puducherry', '35': 'Andaman and Nicobar Islands', '36': 'Telangana',
+        '37': 'Andhra Pradesh', '38': 'Ladakh'
+      };
+      const stateName = rawGstin && rawGstin.length >= 2 ? (stateMap[rawGstin.substring(0, 2)] || '') : '';
+
       await Ledger.findOneAndUpdate(
-        { companyName: req.user.companyName, partyName: newEntry.partyName },
+        { companyName: req.user.companyName, partyName: cleanPartyName },
         { 
           $inc: { balance: -newEntry.totalAmount }, 
           $set: { 
+            gstin: rawGstin,
+            parentGroup: 'Sundry Creditors',
+            stateName: stateName,
             updatedAt: new Date(), 
             userId: req.user.id
           } 
         },
-        { upsert: true }
+        { upsert: true, returnDocument: 'after' }
       );
     }
 
