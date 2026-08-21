@@ -59,6 +59,7 @@ const Dashboard: React.FC = () => {
   const [bankFile, setBankFile] = useState<File | null>(null);
   const [parsingBank, setParsingBank] = useState(false);
   const [selectedBank, setSelectedBank] = useState<string>('HDFC Bank');
+  const [accountType, setAccountType] = useState<string>('Current Account');
   const [bankParseResult, setBankParseResult] = useState<any>(null);
   const [targetBankLedger, setTargetBankLedger] = useState<string>('');
   const [tempTransactions, setTempTransactions] = useState<any[]>([]);
@@ -68,10 +69,157 @@ const Dashboard: React.FC = () => {
   const [showProModal, setShowProModal] = useState(false);
   const [editingTxnIdx, setEditingTxnIdx] = useState<number | null>(null);
 
-  // States for Tally ledgers and bulk mapping transactions
+  // States for Tally ledgers, vouchers, and reconciliation
   const [tallyLedgers, setTallyLedgers] = useState<any[]>([]);
+  const [tallyVouchers, setTallyVouchers] = useState<any[]>([]);
+  const [suspenseGuid, setSuspenseGuid] = useState<string>('');
   const [selectedTxnIndices, setSelectedTxnIndices] = useState<number[]>([]);
   const [bulkTargetLedger, setBulkTargetLedger] = useState<string>('');
+
+  const isCloseDate = (d1: string, d2: string, daysAllowed = 10) => {
+    if (!d1 || !d2) return false;
+    try {
+      const time1 = new Date(d1).getTime();
+      const time2 = new Date(d2).getTime();
+      if (isNaN(time1) || isNaN(time2)) return false;
+      const diffDays = Math.abs(time1 - time2) / (1000 * 60 * 60 * 24);
+      return diffDays <= daysAllowed;
+    } catch {
+      return false;
+    }
+  };
+
+  const reconcileTxns = (txns: any[], ledgers: any[], vouchers: any[], fallbackSuspenseGuid: string) => {
+    return txns.map(t => {
+      const rawParty = (t.partyName || t.originalPartyName || '').trim();
+      const rawNotes = (t.notes || t.narration || '').trim();
+      const rawRef = (t.referenceNumber || t.invoiceNumber || '').trim();
+      const isSyntheticRef = !rawRef || rawRef.startsWith('TXN-');
+      const amt = Math.abs(cleanNum(t.totalAmount));
+      const typeLower = (t.type || 'payment').toLowerCase();
+      const targetDirection = typeLower === 'receipt' ? 'receipt' : 'payment';
+
+      // Step A: Find Existing Ledger in Tally
+      let mappedParty = 'Suspense';
+      let mappedGuid = fallbackSuspenseGuid || '';
+
+      if (rawParty && rawParty.toLowerCase() !== 'suspense') {
+        const exactL = ledgers.find(l => l.partyName?.toLowerCase()?.trim() === rawParty.toLowerCase());
+        if (exactL) {
+          mappedParty = exactL.partyName;
+          mappedGuid = exactL._id || '';
+        } else {
+          const fuzzyL = ledgers.find(l => {
+            const lName = l.partyName?.toLowerCase()?.trim();
+            return lName && (rawParty.toLowerCase().includes(lName) || lName.includes(rawParty.toLowerCase()));
+          });
+          if (fuzzyL) {
+            mappedParty = fuzzyL.partyName;
+            mappedGuid = fuzzyL._id || '';
+          }
+        }
+      }
+
+      if (mappedParty === 'Suspense' && fallbackSuspenseGuid) {
+        mappedGuid = fallbackSuspenseGuid;
+      }
+
+      // Step B: Multi-Signal Matching against Day Book Vouchers
+      let matchedV: any = null;
+      let matchReason = '';
+
+      // Signal 1: By Reference/UTR (highest confidence)
+      if (!isSyntheticRef) {
+        matchedV = vouchers.find(v => 
+          (v.reference && v.reference.toLowerCase() === rawRef.toLowerCase()) ||
+          (v.voucherNumber && v.voucherNumber.toLowerCase() === rawRef.toLowerCase()) ||
+          (v.narration && v.narration.toLowerCase().includes(rawRef.toLowerCase()))
+        );
+        if (matchedV) matchReason = 'ref';
+      }
+
+      // Signal 2: By Party + Approximate Date Range + Direction
+      if (!matchedV && mappedParty !== 'Suspense') {
+        matchedV = vouchers.find(v => {
+          const vParty = (v.partyName || '').toLowerCase().trim();
+          const vType = (v.voucherType || '').toLowerCase();
+          const vDir = (vType === 'receipt' || vType === 'sales') ? 'receipt' : 'payment';
+          const partyMatch = vParty === mappedParty.toLowerCase() || vParty.includes(mappedParty.toLowerCase()) || mappedParty.toLowerCase().includes(vParty);
+          const dateMatch = isCloseDate(v.date, t.date, 10);
+          return partyMatch && dateMatch && vDir === targetDirection;
+        });
+        if (matchedV) matchReason = 'party-date';
+      }
+
+      // Signal 3: By Amount + Approximate Date Range + Direction
+      if (!matchedV) {
+        matchedV = vouchers.find(v => {
+          const vAmt = Math.abs(cleanNum(v.amount));
+          const vType = (v.voucherType || '').toLowerCase();
+          const vDir = (vType === 'receipt' || vType === 'sales') ? 'receipt' : 'payment';
+          const amtMatch = Math.abs(vAmt - amt) < 0.01;
+          const dateMatch = isCloseDate(v.date, t.date, 5);
+          return amtMatch && dateMatch && vDir === targetDirection;
+        });
+        if (matchedV) matchReason = 'amt-date';
+      }
+
+      // Step C: Assign Classification & Smart Default Action
+      let reconStatus: 'MATCHED' | 'AMOUNT MISMATCH' | 'LEDGER MISMATCH' | 'MISSING VOUCHER' | 'SUSPENSE' = 'SUSPENSE';
+      let defaultAction: 'skip' | 'alter' | 'create' = 'create';
+      let tallyGuid = '';
+      let diffDetail = '';
+
+      if (matchedV) {
+        tallyGuid = matchedV.guid || '';
+        const vAmt = Math.abs(cleanNum(matchedV.amount));
+        const amtDiff = Math.abs(vAmt - amt);
+        const isAmtMatch = amtDiff < 0.01;
+        const isLedgerMatch = mappedParty !== 'Suspense' && (matchedV.partyName || '').toLowerCase().trim() === mappedParty.toLowerCase().trim();
+
+        if (isAmtMatch && isLedgerMatch) {
+          reconStatus = 'MATCHED';
+          defaultAction = 'skip'; // Matched -> default to SKIP (keep in history, do not duplicate)
+          diffDetail = `Matched with DayBook #${matchedV.voucherNumber || matchedV.reference || 'Vch'}`;
+        } else if (!isAmtMatch && (isLedgerMatch || matchReason === 'ref' || matchReason === 'party-date')) {
+          reconStatus = 'AMOUNT MISMATCH';
+          defaultAction = 'alter'; // Soft amount matching -> default to ALTER with tallyGuid
+          diffDetail = `Bank: ₹${amt.toLocaleString('en-IN')} vs Tally: ₹${vAmt.toLocaleString('en-IN')}`;
+        } else if (!isLedgerMatch && (isAmtMatch || matchReason === 'ref' || matchReason === 'amt-date')) {
+          reconStatus = 'LEDGER MISMATCH';
+          defaultAction = 'alter'; // Existing voucher found, default to ALTER to prevent duplicate
+          diffDetail = `Tally: ${matchedV.partyName || 'Unknown'} → Bank: ${mappedParty}`;
+        } else {
+          reconStatus = 'AMOUNT MISMATCH';
+          defaultAction = 'alter';
+          diffDetail = `Bank: ₹${amt.toLocaleString('en-IN')} vs Tally: ₹${vAmt.toLocaleString('en-IN')}`;
+        }
+      } else {
+        if (mappedParty !== 'Suspense') {
+          reconStatus = 'MISSING VOUCHER';
+          defaultAction = 'create';
+          diffDetail = `New voucher for ${mappedParty}`;
+        } else {
+          reconStatus = 'SUSPENSE';
+          defaultAction = 'create';
+          diffDetail = `Unmapped party → Posting via Suspense A/c`;
+        }
+      }
+
+      return {
+        ...t,
+        partyName: t.partyName || mappedParty,
+        partyGuid: t.partyGuid || mappedGuid,
+        bankPartyName: t.bankPartyName || rawParty || mappedParty,
+        bankNarration: t.bankNarration || rawNotes,
+        reconStatus,
+        action: t.action || defaultAction,
+        tallyGuid,
+        matchedVoucher: matchedV,
+        diffDetail
+      };
+    });
+  };
 
   const handleRowCheckboxToggle = (idx: number) => {
     setSelectedTxnIndices(prev => 
@@ -87,11 +235,49 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const updatePartyMapping = (idx: number, newParty: string) => {
+    const matchedLedger = tallyLedgers.find(l => l.partyName === newParty);
+    const newGuid = matchedLedger ? (matchedLedger._id || '') : (newParty === 'Suspense' ? suspenseGuid : '');
+    setTempTransactions(prev => prev.map((t, i) => {
+      if (i !== idx) return t;
+      const isSuspense = newParty === 'Suspense';
+      return {
+        ...t,
+        partyName: newParty,
+        partyGuid: newGuid,
+        reconStatus: isSuspense ? 'SUSPENSE' : (t.reconStatus === 'SUSPENSE' ? 'MISSING VOUCHER' : t.reconStatus),
+        diffDetail: isSuspense ? 'Unmapped party → Posting via Suspense A/c' : `Mapped to ${newParty}`
+      };
+    }));
+  };
+
+  const updateRowAction = (idx: number, newAction: 'create' | 'alter' | 'skip') => {
+    setTempTransactions(prev => prev.map((t, i) => i === idx ? { ...t, action: newAction } : t));
+  };
+
+  const handleBulkSetAction = (newAction: 'create' | 'alter' | 'skip') => {
+    if (selectedTxnIndices.length === 0) return;
+    setTempTransactions(prev => prev.map((t, idx) => 
+      selectedTxnIndices.includes(idx) ? { ...t, action: newAction } : t
+    ));
+    showToast(`Updated ${selectedTxnIndices.length} transaction(s) action to ${newAction.toUpperCase()}!`, 'success');
+  };
+
   const handleBulkMapLedger = () => {
     if (!bulkTargetLedger) return;
-    setTempTransactions(prev => prev.map((t, idx) => 
-      selectedTxnIndices.includes(idx) ? { ...t, partyName: bulkTargetLedger } : t
-    ));
+    const matchedLedger = tallyLedgers.find(l => l.partyName === bulkTargetLedger);
+    const newGuid = matchedLedger ? (matchedLedger._id || '') : (bulkTargetLedger === 'Suspense' ? suspenseGuid : '');
+    setTempTransactions(prev => prev.map((t, idx) => {
+      if (!selectedTxnIndices.includes(idx)) return t;
+      const isSuspense = bulkTargetLedger === 'Suspense';
+      return {
+        ...t,
+        partyName: bulkTargetLedger,
+        partyGuid: newGuid,
+        reconStatus: isSuspense ? 'SUSPENSE' : (t.reconStatus === 'SUSPENSE' ? 'MISSING VOUCHER' : t.reconStatus),
+        diffDetail: isSuspense ? 'Unmapped party → Posting via Suspense A/c' : `Mapped to ${bulkTargetLedger}`
+      };
+    }));
     setSelectedTxnIndices([]);
     setBulkTargetLedger('');
     showToast(`Mapped ${selectedTxnIndices.length} transactions to ${bulkTargetLedger}!`, 'success');
@@ -181,6 +367,9 @@ const Dashboard: React.FC = () => {
     if (selectedBank) {
       formData.append('selectedBank', selectedBank);
     }
+    if (accountType) {
+      formData.append('accountType', accountType);
+    }
     if (bankPassword) {
       formData.append('password', bankPassword);
     }
@@ -193,10 +382,16 @@ const Dashboard: React.FC = () => {
         }
       });
       const detectedBank = selectedBank || (res.data.bankName || 'Bank Account').trim();
+      if (res.data.accountType) {
+        setAccountType(res.data.accountType);
+      }
       setBankParseResult(res.data);
       setTargetBankLedger(detectedBank);
-      setTempTransactions(res.data.data || []);
-      showToast(`Detected ${detectedBank}! Extracted ${res.data.count} transactions. Review before syncing.`, 'success');
+      
+      const rawData = res.data.data || [];
+      const reconciled = reconcileTxns(rawData, tallyLedgers, tallyVouchers, suspenseGuid);
+      setTempTransactions(reconciled);
+      showToast(`Detected ${detectedBank}! Extracted ${res.data.count} transactions with full reconciliation mapping.`, 'success');
     } catch (err: any) {
       console.error(err);
       showToast(err.response?.data?.error || 'Failed to parse bank statement', 'error');
@@ -223,22 +418,32 @@ const Dashboard: React.FC = () => {
       const bankName = (targetBankLedger || selectedBank || 'Bank Account').trim();
       const enrichedTransactions = tempTransactions.map(t => ({
         ...t,
-        bankLedger: (t.bankLedger || bankName).trim()
+        bankLedger: (t.bankLedger || bankName).trim(),
+        accountType: t.accountType || accountType,
+        action: t.action || 'create',
+        partyName: t.partyName || 'Suspense',
+        partyGuid: t.partyGuid || suspenseGuid || '',
+        tallyGuid: t.tallyGuid || '',
+        reconStatus: t.reconStatus || '',
+        bankPartyName: t.bankPartyName || t.partyName || '',
+        bankNarration: t.bankNarration || t.notes || ''
       }));
 
       const res = await axios.post('/api/entries/bulk', { 
         transactions: enrichedTransactions,
-        bankName 
+        bankName,
+        accountType
       }, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-      showToast(`Successfully queued ${res.data.count} transactions for ${bankName} in Tally!`, 'success');
+      showToast(`Successfully processed ${res.data.count} transactions for ${bankName}!`, 'success');
       setIsBankModalOpen(false);
       setBankFile(null);
       setBankParseResult(null);
       setTempTransactions([]);
       setTargetBankLedger('');
       setBankPassword('');
+      setAccountType('Current Account');
       fetchData();
     } catch (err: any) {
       console.error(err);
@@ -256,7 +461,6 @@ const Dashboard: React.FC = () => {
     onAfterPrint: () => setPrintData(null)
   });
 
-
   useEffect(() => {
     if (printData && printRef.current) {
       handlePrintAction();
@@ -267,53 +471,37 @@ const Dashboard: React.FC = () => {
   const [recentFilter, setRecentFilter] = useState<'all' | 'today' | 'yesterday' | 'week'>('all');
   const [retryingBillId, setRetryingBillId] = useState<string | null>(null);
 
-  // Load Tally ledgers and auto-resolve mappings when modal opens
+  // Load Tally ledgers and existing Day Book vouchers when modal opens
   useEffect(() => {
     if (isBankModalOpen) {
-      const loadLedgers = async () => {
+      const loadTallyData = async () => {
         try {
-          const res = await axios.get('/api/ledger', {
-            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-          });
-          setTallyLedgers(res.data || []);
+          const [ledgersRes, vouchersRes] = await Promise.all([
+            axios.get('/api/ledger', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).catch(() => ({ data: [] })),
+            axios.get('/api/ledger/vouchers/all', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).catch(() => ({ data: [] }))
+          ]);
+          
+          const loadedLedgers = ledgersRes.data || [];
+          const loadedVouchers = vouchersRes.data || [];
+          setTallyLedgers(loadedLedgers);
+          setTallyVouchers(loadedVouchers);
+
+          const foundSuspense = loadedLedgers.find((l: any) => 
+            l.partyName?.toLowerCase() === 'suspense' || l.parentGroup?.toLowerCase()?.includes('suspense')
+          );
+          const sGuid = foundSuspense ? (foundSuspense._id || '') : '';
+          setSuspenseGuid(sGuid);
+
+          if (tempTransactions.length > 0) {
+            setTempTransactions(prev => reconcileTxns(prev, loadedLedgers, loadedVouchers, sGuid));
+          }
         } catch (e) {
-          console.error("Failed to load Tally ledgers", e);
+          console.error("Failed to load Tally data for reconciliation", e);
         }
       };
-      loadLedgers();
+      loadTallyData();
     }
   }, [isBankModalOpen]);
-
-  useEffect(() => {
-    if (tallyLedgers.length > 0 && tempTransactions.length > 0) {
-      setTempTransactions(prev => prev.map(t => {
-        const currentName = (t.partyName || t.notes || '').toLowerCase().trim();
-        
-        if (currentName === 'suspense') {
-          return t;
-        }
-
-        // Try exact case-insensitive match
-        const exactMatch = tallyLedgers.find(l => l.partyName.toLowerCase().trim() === currentName);
-        if (exactMatch) {
-          return { ...t, partyName: exactMatch.partyName };
-        }
-
-        // Try fuzzy match: check if ledger name is part of statement text or vice versa
-        const fuzzyMatch = tallyLedgers.find(l => {
-          const lName = l.partyName.toLowerCase().trim();
-          return currentName.includes(lName) || lName.includes(currentName);
-        });
-
-        if (fuzzyMatch) {
-          return { ...t, partyName: fuzzyMatch.partyName };
-        }
-
-        // Default to Suspense if no exact or fuzzy match exists
-        return { ...t, partyName: 'Suspense' };
-      }));
-    }
-  }, [tallyLedgers]);
 
   const handlePrintBill = async (entry: any) => {
     const tot = Number(entry.totalAmount || 0);
@@ -1051,7 +1239,7 @@ const Dashboard: React.FC = () => {
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {/* Bank Selection */}
-                    <div className="space-y-1.5 sm:col-span-2">
+                    <div className="space-y-1.5 sm:col-span-1">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Select Bank</label>
                       <select 
                         value={selectedBank}
@@ -1062,6 +1250,22 @@ const Dashboard: React.FC = () => {
                         {SUPPORTED_BANKS.map((b) => (
                           <option key={b} value={b}>{b}</option>
                         ))}
+                      </select>
+                    </div>
+
+                    {/* Account Type Selection */}
+                    <div className="space-y-1.5 sm:col-span-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Account Type</label>
+                      <select 
+                        value={accountType}
+                        onChange={(e) => setAccountType(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition-all cursor-pointer"
+                        disabled={parsingBank}
+                      >
+                        <option value="Current Account">Current Account (Bank Accounts)</option>
+                        <option value="Savings Account">Savings Account (Bank Accounts)</option>
+                        <option value="Overdraft Account (OD)">Overdraft Account (Bank OD A/c)</option>
+                        <option value="Cash Credit (CC)">Cash Credit (Bank OCC A/c)</option>
                       </select>
                     </div>
 
@@ -1139,7 +1343,7 @@ const Dashboard: React.FC = () => {
                 </>
               ) : (
                 <div className="space-y-4">
-                  {/* Top Statement Info Banner */}
+                  {/* Top Statement Info Banner & Reconciliation Counters */}
                   <div className="p-4 bg-slate-900 text-white rounded-2xl shadow-sm space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
                       <div>
@@ -1151,6 +1355,9 @@ const Dashboard: React.FC = () => {
                               (A/c: {bankParseResult.accountNumber})
                             </span>
                           )}
+                          <span className="px-2 py-0.5 bg-indigo-950/80 text-indigo-300 border border-indigo-700/50 rounded-md text-[10px] font-bold">
+                            {accountType}
+                          </span>
                         </div>
                       </div>
 
@@ -1178,55 +1385,140 @@ const Dashboard: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Tally Bank Ledger Target Editor */}
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-300">Target Tally Ledger:</span>
-                        <input 
-                          type="text"
-                          value={targetBankLedger}
-                          onChange={(e) => handleApplyBankLedgerToAll(e.target.value)}
-                          className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs font-bold text-white outline-none focus:border-indigo-500"
-                        />
+                    {/* Reconciliation Statistics Summary Bar */}
+                    {(() => {
+                      const total = tempTransactions.length;
+                      const matched = tempTransactions.filter(t => t.reconStatus === 'MATCHED').length;
+                      const amtMismatch = tempTransactions.filter(t => t.reconStatus === 'AMOUNT MISMATCH').length;
+                      const ledgerMismatch = tempTransactions.filter(t => t.reconStatus === 'LEDGER MISMATCH').length;
+                      const missing = tempTransactions.filter(t => t.reconStatus === 'MISSING VOUCHER').length;
+                      const suspense = tempTransactions.filter(t => t.reconStatus === 'SUSPENSE').length;
+                      const alterCount = tempTransactions.filter(t => t.action === 'alter').length;
+                      const skipCount = tempTransactions.filter(t => t.action === 'skip').length;
+                      const createCount = tempTransactions.filter(t => t.action === 'create').length;
+
+                      return (
+                        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-1">
+                          <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+                            <span className="text-[9px] font-bold text-slate-400 block uppercase">Total Items</span>
+                            <span className="text-sm font-black text-white font-mono">{total}</span>
+                          </div>
+                          <div className="bg-emerald-950/40 p-2 rounded-xl border border-emerald-800/50">
+                            <span className="text-[9px] font-bold text-emerald-400 block uppercase">🟢 Matched</span>
+                            <span className="text-sm font-black text-emerald-300 font-mono">{matched} <span className="text-[10px] text-emerald-400/80 font-normal">(Skip)</span></span>
+                          </div>
+                          <div className="bg-amber-950/40 p-2 rounded-xl border border-amber-800/50">
+                            <span className="text-[9px] font-bold text-amber-400 block uppercase">🟡 Amt Mismatch</span>
+                            <span className="text-sm font-black text-amber-300 font-mono">{amtMismatch} <span className="text-[10px] text-amber-400/80 font-normal">(Alter)</span></span>
+                          </div>
+                          <div className="bg-orange-950/40 p-2 rounded-xl border border-orange-800/50">
+                            <span className="text-[9px] font-bold text-orange-400 block uppercase">🟠 Ledger Mismatch</span>
+                            <span className="text-sm font-black text-orange-300 font-mono">{ledgerMismatch} <span className="text-[10px] text-orange-400/80 font-normal">(Alter)</span></span>
+                          </div>
+                          <div className="bg-blue-950/40 p-2 rounded-xl border border-blue-800/50">
+                            <span className="text-[9px] font-bold text-blue-400 block uppercase">🔵 Missing Vch</span>
+                            <span className="text-sm font-black text-blue-300 font-mono">{missing} <span className="text-[10px] text-blue-400/80 font-normal">(Create)</span></span>
+                          </div>
+                          <div className="bg-purple-950/40 p-2 rounded-xl border border-purple-800/50">
+                            <span className="text-[9px] font-bold text-purple-400 block uppercase">🟣 Suspense</span>
+                            <span className="text-sm font-black text-purple-300 font-mono">{suspense} <span className="text-[10px] text-purple-400/80 font-normal">(Create)</span></span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Target Bank Ledger & Account Type Selector */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-300">Target Tally Bank Ledger:</span>
+                          <input 
+                            type="text"
+                            value={targetBankLedger}
+                            onChange={(e) => handleApplyBankLedgerToAll(e.target.value)}
+                            className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs font-bold text-white outline-none focus:border-indigo-500"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-300">Account Type:</span>
+                          <select
+                            value={accountType}
+                            onChange={(e) => setAccountType(e.target.value)}
+                            className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs font-bold text-white outline-none focus:border-indigo-500 cursor-pointer"
+                          >
+                            <option value="Current Account">Current Account (Bank Accounts)</option>
+                            <option value="Savings Account">Savings Account (Bank Accounts)</option>
+                            <option value="Overdraft Account (OD)">Overdraft Account (Bank OD A/c)</option>
+                            <option value="Cash Credit (CC)">Cash Credit (Bank OCC A/c)</option>
+                          </select>
+                        </div>
                       </div>
 
-                      <div className="text-xs font-bold text-slate-400">
-                        Total Transactions: <span className="text-white font-mono">{tempTransactions.length}</span>
+                      <div className="text-[11px] font-semibold text-slate-400">
+                        Review mappings below. Click <span className="text-amber-400 font-bold">Alter</span> to update existing vouchers or <span className="text-emerald-400 font-bold">Skip</span> to ignore already synced entries.
                       </div>
                     </div>
                   </div>
 
-                  {/* Bulk mapping action bar */}
+                  {/* Bulk mapping and bulk action bar */}
                   {selectedTxnIndices.length > 0 && (
-                    <div className="flex items-center gap-3 bg-slate-100 p-3 rounded-2xl border border-slate-200 shadow-sm animate-fade-in">
-                      <span className="text-xs font-bold text-slate-655">
-                        Selected {selectedTxnIndices.length} transaction(s):
-                      </span>
-                      <select
-                        value={bulkTargetLedger}
-                        onChange={(e) => setBulkTargetLedger(e.target.value)}
-                        className="px-3 py-1.5 bg-white border border-slate-250 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer shadow-xs"
-                      >
-                        <option value="">-- Map to Tally Ledger --</option>
-                        <option value="Suspense">Suspense (Unmapped)</option>
-                        {tallyLedgers.map(l => (
-                          <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={handleBulkMapLedger}
-                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-500/10 transition-all cursor-pointer"
-                        disabled={!bulkTargetLedger}
-                      >
-                        Apply Map
-                      </button>
+                    <div className="flex flex-wrap items-center justify-between gap-3 bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200 shadow-sm animate-fade-in">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-indigo-900">
+                          Selected {selectedTxnIndices.length} transaction(s):
+                        </span>
+                        <select
+                          value={bulkTargetLedger}
+                          onChange={(e) => setBulkTargetLedger(e.target.value)}
+                          className="px-3 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer shadow-xs"
+                        >
+                          <option value="">-- Map Target Ledger --</option>
+                          <option value="Suspense">⚠️ Suspense (Unmapped)</option>
+                          {tallyLedgers.map(l => (
+                            <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={handleBulkMapLedger}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                          disabled={!bulkTargetLedger}
+                        >
+                          Apply Map
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-600">Set Action:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleBulkSetAction('create')}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                        >
+                          CREATE
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleBulkSetAction('alter')}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                        >
+                          ALTER
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleBulkSetAction('skip')}
+                          className="px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                        >
+                          SKIP
+                        </button>
+                      </div>
                     </div>
                   )}
 
                   {/* High Density Statement Transactions Table */}
                   <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs bg-white">
-                    <div className="max-h-[380px] overflow-y-auto">
+                    <div className="max-h-[420px] overflow-y-auto">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider sticky top-0 z-10 border-b border-slate-200">
                           <tr>
@@ -1238,88 +1530,118 @@ const Dashboard: React.FC = () => {
                                 className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
                               />
                             </th>
-                            <th className="p-3 w-28">Date</th>
-                            <th className="p-3">Particulars / Narration</th>
-                            <th className="p-3 text-right w-32">Deposits (Cr)</th>
-                            <th className="p-3 text-right w-32">Withdrawals (Dr)</th>
-                            <th className="p-3 text-right w-36">Balance</th>
-                            <th className="p-3 text-center w-24">Action</th>
+                            <th className="p-3 w-24">Date</th>
+                            <th className="p-3 w-48">Reconciliation Status</th>
+                            <th className="p-3">Particulars & Mapping</th>
+                            <th className="p-3 text-right w-28">Amount</th>
+                            <th className="p-3 text-center w-36">Tally Action</th>
+                            <th className="p-3 text-center w-16">Row</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                          {(() => {
-                            let runningBal = cleanNum(bankParseResult?.openingBalance);
-                            return tempTransactions.map((txn: any, idx: number) => {
-                              const amt = cleanNum(txn.totalAmount);
-                              const typeLower = (txn.type || '').toLowerCase();
-                              let isDeposit = typeLower === 'receipt';
-                              let isWithdrawal = typeLower === 'payment';
-                              if (typeLower === 'contra') {
-                                if ((txn.notes || '').toLowerCase().includes('deposit') || (txn.partyName || '').toLowerCase().includes('deposit')) {
-                                  isDeposit = true;
-                                } else {
-                                  isWithdrawal = true;
-                                }
+                          {tempTransactions.map((txn: any, idx: number) => {
+                            const amt = cleanNum(txn.totalAmount);
+                            const typeLower = (txn.type || '').toLowerCase();
+                            let isDeposit = typeLower === 'receipt';
+                            let isWithdrawal = typeLower === 'payment';
+                            if (typeLower === 'contra') {
+                              if ((txn.notes || '').toLowerCase().includes('deposit') || (txn.partyName || '').toLowerCase().includes('deposit')) {
+                                isDeposit = true;
+                              } else {
+                                isWithdrawal = true;
                               }
+                            }
 
-                              if (isDeposit) runningBal += amt;
-                              else if (isWithdrawal) runningBal -= amt;
+                            const isEditing = editingTxnIdx === idx;
+                            const status = txn.reconStatus || 'SUSPENSE';
+                            const action = txn.action || 'create';
 
-                              const isEditing = editingTxnIdx === idx;
+                            // Status badge colors
+                            let statusBadgeClass = 'bg-purple-50 text-purple-700 border-purple-200';
+                            let statusLabel = '🟣 SUSPENSE';
+                            if (status === 'MATCHED') {
+                              statusBadgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                              statusLabel = '🟢 MATCHED';
+                            } else if (status === 'AMOUNT MISMATCH') {
+                              statusBadgeClass = 'bg-amber-50 text-amber-800 border-amber-300';
+                              statusLabel = '🟡 AMOUNT MISMATCH';
+                            } else if (status === 'LEDGER MISMATCH') {
+                              statusBadgeClass = 'bg-orange-50 text-orange-800 border-orange-300';
+                              statusLabel = '🟠 LEDGER MISMATCH';
+                            } else if (status === 'MISSING VOUCHER') {
+                              statusBadgeClass = 'bg-blue-50 text-blue-700 border-blue-200';
+                              statusLabel = '🔵 MISSING VOUCHER';
+                            }
 
-                              return (
-                                <tr key={idx} className={isEditing ? "bg-indigo-50/50" : (selectedTxnIndices.includes(idx) ? "bg-indigo-50/15" : "hover:bg-slate-50/80 transition-colors")}>
-                                  {/* Checkbox */}
-                                  <td className="p-3 text-center align-middle">
+                            return (
+                              <tr key={idx} className={isEditing ? "bg-indigo-50/50" : (selectedTxnIndices.includes(idx) ? "bg-indigo-50/15" : "hover:bg-slate-50/80 transition-colors")}>
+                                {/* Checkbox */}
+                                <td className="p-3 text-center align-top pt-3.5">
+                                  <input 
+                                    type="checkbox"
+                                    checked={selectedTxnIndices.includes(idx)}
+                                    onChange={() => handleRowCheckboxToggle(idx)}
+                                    className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
+                                  />
+                                </td>
+                                
+                                {/* Date */}
+                                <td className="p-3 align-top whitespace-nowrap font-mono text-slate-600 pt-3.5">
+                                  {isEditing ? (
                                     <input 
-                                      type="checkbox"
-                                      checked={selectedTxnIndices.includes(idx)}
-                                      onChange={() => handleRowCheckboxToggle(idx)}
-                                      className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
+                                      type="date"
+                                      value={txn.date}
+                                      onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
+                                      className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
                                     />
-                                  </td>
-                                  
-                                  {/* Date */}
-                                  <td className="p-3 align-top whitespace-nowrap font-mono text-slate-600">
-                                    {isEditing ? (
+                                  ) : (
+                                    txn.date
+                                  )}
+                                </td>
+
+                                {/* Reconciliation Status Column */}
+                                <td className="p-3 align-top pt-3.5">
+                                  <div className="space-y-1">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black tracking-wide border ${statusBadgeClass}`}>
+                                      {statusLabel}
+                                    </span>
+                                    {txn.diffDetail && (
+                                      <div className="text-[10px] font-bold text-slate-600 leading-tight">
+                                        {txn.diffDetail}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* Particulars & Ledger Mapping */}
+                                <td className="p-3 align-top">
+                                  {isEditing ? (
+                                    <div className="space-y-1">
                                       <input 
-                                        type="date"
-                                        value={txn.date}
-                                        onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
+                                        type="text"
+                                        value={txn.partyName}
+                                        onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
+                                        placeholder="Party Ledger Name"
                                         className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
                                       />
-                                    ) : (
-                                      txn.date
-                                    )}
-                                  </td>
-
-                                  {/* Particulars & Narration */}
-                                  <td className="p-3 align-top">
-                                    {isEditing ? (
-                                      <div className="space-y-1">
-                                        <input 
-                                          type="text"
-                                          value={txn.partyName}
-                                          onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
-                                          placeholder="Party Ledger Name"
-                                          className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
-                                        />
-                                        <input 
-                                          type="text"
-                                          value={txn.notes}
-                                          onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
-                                          placeholder="Narration details..."
-                                          className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] text-slate-600"
-                                        />
-                                      </div>
-                                    ) : (
-                                      <div className="space-y-1.5 max-w-sm">
+                                      <input 
+                                        type="text"
+                                        value={txn.notes}
+                                        onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
+                                        placeholder="Narration details..."
+                                        className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] text-slate-600"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-1.5 max-w-sm">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Map to:</span>
                                         <select
                                           value={txn.partyName || 'Suspense'}
-                                          onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
-                                          className={`p-1.5 w-full bg-slate-50 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-bold transition-all cursor-pointer ${
+                                          onChange={(e) => updatePartyMapping(idx, e.target.value)}
+                                          className={`p-1 w-full bg-slate-50 border rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-bold transition-all cursor-pointer ${
                                             txn.partyName === 'Suspense' 
-                                              ? 'border-purple-250 text-purple-700 font-black bg-purple-50/30' 
+                                              ? 'border-purple-300 text-purple-700 font-black bg-purple-50/40' 
                                               : 'border-slate-200 text-slate-900'
                                           }`}
                                         >
@@ -1328,77 +1650,113 @@ const Dashboard: React.FC = () => {
                                             <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
                                           ))}
                                         </select>
-                                        <div className="text-[10px] text-slate-400 font-normal leading-tight line-clamp-1">{txn.notes}</div>
                                       </div>
-                                    )}
-                                  </td>
-
-                                  {/* Deposits */}
-                                  <td className="p-3 align-top text-right font-mono font-bold text-emerald-600 whitespace-nowrap">
-                                    {isEditing ? (
-                                      <div className="space-y-1">
-                                        <select
-                                          value={txn.type}
-                                          onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
-                                          className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] font-bold uppercase"
-                                        >
-                                          <option value="receipt">Receipt (Cr)</option>
-                                          <option value="payment">Payment (Dr)</option>
-                                          <option value="contra">Contra</option>
-                                        </select>
-                                        <input 
-                                          type="number"
-                                          value={txn.totalAmount}
-                                          onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
-                                          className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-right"
-                                        />
+                                      <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                                        <span className="font-semibold text-slate-700">{txn.bankPartyName || txn.partyName}</span> {txn.notes && `— ${txn.notes}`}
                                       </div>
-                                    ) : isDeposit ? (
-                                      `₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                                    ) : (
-                                      <span className="text-slate-300 font-normal">-</span>
-                                    )}
-                                  </td>
-
-                                  {/* Withdrawals */}
-                                  <td className="p-3 align-top text-right font-mono font-bold text-rose-600 whitespace-nowrap">
-                                    {!isEditing && (isWithdrawal ? (
-                                      `₹${amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                                    ) : (
-                                      <span className="text-slate-300 font-normal">-</span>
-                                    ))}
-                                  </td>
-
-                                  {/* Balance */}
-                                  <td className="p-3 align-top text-right font-mono font-bold text-slate-800 whitespace-nowrap">
-                                    `₹${runningBal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                                  </td>
-
-                                  {/* Action */}
-                                  <td className="p-3 align-top text-center whitespace-nowrap">
-                                    <div className="flex items-center justify-center gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingTxnIdx(isEditing ? null : idx)}
-                                        className={`p-1.5 rounded-lg transition-colors ${isEditing ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
-                                        title={isEditing ? "Save Row" : "Edit Row"}
-                                      >
-                                        <Check className="h-3.5 w-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => removeTempTxn(idx)}
-                                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                                        title="Delete Row"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </button>
                                     </div>
-                                  </td>
-                                </tr>
-                              );
-                            });
-                          })()}
+                                  )}
+                                </td>
+
+                                {/* Amount Column */}
+                                <td className="p-3 align-top text-right font-mono font-bold whitespace-nowrap pt-3.5">
+                                  {isEditing ? (
+                                    <div className="space-y-1">
+                                      <select
+                                        value={txn.type}
+                                        onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
+                                        className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] font-bold uppercase"
+                                      >
+                                        <option value="receipt">Receipt (Cr)</option>
+                                        <option value="payment">Payment (Dr)</option>
+                                        <option value="contra">Contra</option>
+                                      </select>
+                                      <input 
+                                        type="number"
+                                        value={txn.totalAmount}
+                                        onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
+                                        className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-right"
+                                      />
+                                    </div>
+                                  ) : isDeposit ? (
+                                    <div className="text-emerald-600">
+                                      +₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                      <span className="block text-[9px] font-bold uppercase text-emerald-400">Receipt</span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-rose-600">
+                                      -₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                      <span className="block text-[9px] font-bold uppercase text-rose-400">Payment</span>
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* Tally Action Column */}
+                                <td className="p-3 align-top text-center whitespace-nowrap pt-3.5">
+                                  <div className="inline-flex rounded-lg shadow-xs border border-slate-200 overflow-hidden bg-slate-50 p-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateRowAction(idx, 'create')}
+                                      className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
+                                        action === 'create' 
+                                          ? 'bg-blue-600 text-white shadow-xs' 
+                                          : 'text-slate-500 hover:text-slate-900'
+                                      }`}
+                                      title="Create new Receipt/Payment voucher in Tally"
+                                    >
+                                      CREATE
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateRowAction(idx, 'alter')}
+                                      className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
+                                        action === 'alter' 
+                                          ? 'bg-amber-600 text-white shadow-xs' 
+                                          : 'text-slate-500 hover:text-slate-900'
+                                      }`}
+                                      title="Alter/Update existing voucher in Tally"
+                                    >
+                                      ALTER
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateRowAction(idx, 'skip')}
+                                      className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
+                                        action === 'skip' 
+                                          ? 'bg-slate-700 text-white shadow-xs' 
+                                          : 'text-slate-500 hover:text-slate-900'
+                                      }`}
+                                      title="Skip syncing to Tally (already exists)"
+                                    >
+                                      SKIP
+                                    </button>
+                                  </div>
+                                </td>
+
+                                {/* Row Controls */}
+                                <td className="p-3 align-top text-center whitespace-nowrap pt-3.5">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingTxnIdx(isEditing ? null : idx)}
+                                      className={`p-1.5 rounded-lg transition-colors ${isEditing ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                                      title={isEditing ? "Save Row" : "Edit Row"}
+                                    >
+                                      <Check className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeTempTxn(idx)}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                      title="Delete Row"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1428,12 +1786,12 @@ const Dashboard: React.FC = () => {
                       {syncSaving ? (
                         <>
                           <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
-                          Syncing Vouchers to Tally...
+                          Syncing Reconciled Vouchers to Tally...
                         </>
                       ) : (
                         <>
                           <Check className="h-4 w-4" />
-                          Sync ({tempTransactions.length} Transactions) to Tally
+                          Confirm & Sync to Tally ({tempTransactions.filter(t => t.action !== 'skip').length} to post, {tempTransactions.filter(t => t.action === 'skip').length} skipped)
                         </>
                       )}
                     </button>

@@ -419,11 +419,13 @@ Important Rules:
   };
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }, docPart] }],
       generationConfig: {
-        responseMimeType: 'application/json'
+        responseMimeType: 'application/json',
+        maxOutputTokens: 65536,
+        temperature: 0.1
       }
     });
 
@@ -434,12 +436,16 @@ Important Rules:
 
     return parseGeminiJson<ExtractedInvoiceInfo>(responseText);
   } catch (error: any) {
-    console.warn('Fast flash model failed, trying fallback...', error.message || error);
+    console.warn('Primary flash model failed, trying fallback...', error.message || error);
     try {
-      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
+      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
       const fallbackResult = await fallbackModel.generateContent({
         contents: [{ role: 'user', parts: [{ text: prompt }, docPart] }],
-        generationConfig: { responseMimeType: 'application/json' }
+        generationConfig: { 
+          responseMimeType: 'application/json',
+          maxOutputTokens: 65536,
+          temperature: 0.1
+        }
       });
       return parseGeminiJson<ExtractedInvoiceInfo>(fallbackResult.response.text());
     } catch (fallbackError: any) {
@@ -455,6 +461,10 @@ const bankStatementExtractionSchema = {
     bankName: {
       type: SchemaType.STRING,
       description: 'The identified Bank name from the statement header or logo (e.g. ICICI Bank, HDFC Bank, State Bank of India, Axis Bank, Kotak Mahindra Bank, Punjab National Bank, Bank of Baroda, Canara Bank, IndusInd Bank, Federal Bank, Yes Bank).'
+    },
+    accountType: {
+      type: SchemaType.STRING,
+      description: 'The type of bank account identified from the statement (e.g. "Savings Account", "Current Account", "Overdraft Account", "Cash Credit").'
     },
     accountNumber: {
       type: SchemaType.STRING,
@@ -503,6 +513,69 @@ const bankStatementExtractionSchema = {
   required: ['bankName', 'transactions']
 };
 
+function normalizeDate(rawDate: any): string {
+  if (!rawDate) return new Date().toISOString().split('T')[0];
+  const d = String(rawDate).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  
+  // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
+  const dmy = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (dmy) {
+    const day = dmy[1].padStart(2, '0');
+    const month = dmy[2].padStart(2, '0');
+    let year = dmy[3];
+    if (year.length === 2) year = '20' + year;
+    return `${year}-${month}-${day}`;
+  }
+
+  // DD-Mon-YYYY (e.g. 21-Apr-2026 or 21-Apr-26)
+  const monthMap: Record<string, string> = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+  };
+  const dmon = d.match(/^(\d{1,2})[\/\-\.\s]+([A-Za-z]{3,9})[\/\-\.\s]+(\d{2,4})$/);
+  if (dmon) {
+    const day = dmon[1].padStart(2, '0');
+    const mStr = dmon[2].substring(0, 3).toLowerCase();
+    const month = monthMap[mStr] || '01';
+    let year = dmon[3];
+    if (year.length === 2) year = '20' + year;
+    return `${year}-${month}-${day}`;
+  }
+
+  return d;
+}
+
+function cleanAmount(val: any): number {
+  if (val == null) return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : Math.abs(val);
+  const cleaned = String(val).replace(/,/g, '').replace(/[^\d.\-]/g, '').trim();
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : Math.abs(n);
+}
+
+function isHeaderOrSummaryRow(txn: any): boolean {
+  if (!txn) return true;
+  const narr = (txn.narration || '').toLowerCase().trim();
+  const party = (txn.partyName || '').toLowerCase().trim();
+  const combined = `${narr} ${party}`;
+  
+  if (
+    combined.includes('opening balance') || 
+    combined.includes('closing balance') ||
+    combined.includes('brought forward') ||
+    combined.includes('carried forward') ||
+    combined.includes('b/f') ||
+    combined.includes('c/f') ||
+    combined.includes('total debits') ||
+    combined.includes('total credits') ||
+    combined.includes('statement summary')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export interface ExtractedBankTransaction {
   date: string;
   voucherType: 'Payment' | 'Receipt' | 'Contra' | 'Journal';
@@ -518,6 +591,7 @@ export interface ExtractedBankTransaction {
 
 export interface ExtractedBankStatementInfo {
   bankName: string;
+  accountType?: string;
   accountNumber?: string;
   ifsc?: string;
   openingBalance?: number;
@@ -530,7 +604,7 @@ export interface ExtractedBankStatementInfo {
 }
 
 /**
- * Extracts structured transaction details from a bank statement PDF/image using Gemini.
+ * Extracts structured transaction details from a bank statement PDF/image using Gemini with multi-page precision.
  */
 export async function extractBankStatementDetails(buffer: Buffer, mimeType: string): Promise<ExtractedBankStatementInfo> {
   const isPdf = mimeType === 'application/pdf' || mimeType.includes('pdf');
@@ -544,92 +618,235 @@ export async function extractBankStatementDetails(buffer: Buffer, mimeType: stri
     }
   }
 
-  const baseInstructions = `You are an expert accountant with deep knowledge of Tally Prime, Indian banking systems, and bank statement reconciliation.
-Analyze this bank statement and convert it into structured banking data for Tally accounting.
+  // Model selection with fallback
+  const callGeminiJson = async (prompt: string, maxTokens = 65536): Promise<any> => {
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+    let lastErr: any = null;
 
-STEP 1: IDENTIFY THE BANK & ACCOUNT
-- Identify the exact BANK NAME from the header, logo, or branch details (e.g., "ICICI Bank", "HDFC Bank", "State Bank of India", "Axis Bank", "Kotak Mahindra Bank", "Bank of Baroda", "Punjab National Bank", "Canara Bank", "IndusInd Bank", "Federal Bank").
-- Extract the Account Number, IFSC, Statement Period (from & to dates in YYYY-MM-DD), Opening Balance, and Closing Balance.
+    for (const mName of modelsToTry) {
+      try {
+        const model = genAI.getGenerativeModel({ model: mName });
+        const res = await model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            maxOutputTokens: maxTokens,
+            temperature: 0.1
+          }
+        });
+        const text = res.response.text();
+        if (text) {
+          return parseGeminiJson<any>(text);
+        }
+      } catch (err: any) {
+        lastErr = err;
+        console.warn(`[Gemini] Model ${mName} attempt note:`, err.message || err);
+        // Short pause if rate limit
+        if (err.message && (err.message.includes('429') || err.message.includes('Quota'))) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
+    throw lastErr || new Error('All Gemini models failed to generate response');
+  };
 
-STEP 2: EXTRACT EVERY TRANSACTION
-- Extract EVERY single row in the statement. DO NOT SKIP ANY TRANSACTIONS.
-- For each transaction:
-  1. date: YYYY-MM-DD format.
-  2. Determine voucherType:
-     * Money withdrawn / debited (DR) -> "Payment" (unless transfer to own cash/bank -> "Contra")
-     * Money deposited / credited (CR) -> "Receipt" (unless transfer from own cash/bank -> "Contra")
-     * Cash deposit or Cash withdrawal -> "Contra"
-     * Bank charges, SMS fees, interest -> "Payment" or "Journal"
-  3. partyName: Extract clean counter-party / vendor / client / service name from the narration.
-     * Example: "UPI/412398471/RAVI TRADERS" -> "RAVI TRADERS"
-     * Example: "NEFT-N102938-TECH SOLUTIONS" -> "TECH SOLUTIONS"
-     * Example: "CHG/CONSOLIDATED CHARGES" -> "Bank Charges"
-     * Example: "INT COLL" -> "Interest Received"
-     * Example: "ATM WDL" -> "Cash"
-  4. bankLedger: Set this to the identified Bank Name (e.g. "ICICI Bank" or "HDFC Bank").
-  5. amount: Transaction amount (positive number).
-  6. referenceNumber: UTR / Cheque / Ref / UPI txn id if available.
-  7. narration: Complete clean narration for Tally voucher narration.
-  8. confidence: 0.0 to 1.0.
-  9. reason: Short explanation.
+  // If text extraction produced pages, process with multi-page precision
+  if (extractedText && extractedText.length > 100) {
+    const rawPages = extractedText.split('\f').map(p => p.trim()).filter(p => p.length > 30);
+    const pages = rawPages.length > 0 ? rawPages : [extractedText];
+    console.log(`[Bank Statement] Processing statement containing ${pages.length} page(s)...`);
+
+    // Step 1: Extract Statement Header / Summary Info from Page 1 (or entire text)
+    let headerInfo: any = {
+      bankName: 'Bank Account',
+      accountType: 'Current Account',
+      accountNumber: '',
+      ifsc: '',
+      openingBalance: 0,
+      closingBalance: 0,
+      statementPeriod: null
+    };
+
+    try {
+      const headerPrompt = `Analyze this bank statement text and extract the statement header information.
+Return JSON with:
+{
+  "bankName": "Exact Bank Name (e.g. HDFC Bank, ICICI Bank, State Bank of India, Axis Bank, Kotak Mahindra Bank, Bank of Baroda, Punjab National Bank, Canara Bank, IndusInd Bank, Federal Bank)",
+  "accountType": "Savings Account" or "Current Account" or "Overdraft Account" or "Cash Credit",
+  "accountNumber": "Account Number or masked number",
+  "ifsc": "IFSC code if present",
+  "openingBalance": 0.0,
+  "closingBalance": 0.0,
+  "statementPeriod": { "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }
+}
+
+--- STATEMENT HEADER TEXT ---
+${pages[0].slice(0, 3000)}`;
+
+      const parsedHeader = await callGeminiJson(headerPrompt, 2048);
+      headerInfo = { ...headerInfo, ...parsedHeader };
+    } catch (headErr: any) {
+      console.warn('[Bank Statement] Header extraction warning, continuing with defaults:', headErr.message);
+    }
+
+    const detectedBank = (headerInfo.bankName || 'Bank Account').trim();
+    const detectedAccountType = (headerInfo.accountType || 'Current Account').trim();
+
+    // Step 2: Chunk pages (up to 4 pages per batch) to maximize extraction speed & prevent quota exhaustion
+    const CHUNK_SIZE = 4;
+    const allTransactions: ExtractedBankTransaction[] = [];
+
+    for (let i = 0; i < pages.length; i += CHUNK_SIZE) {
+      const chunkPages = pages.slice(i, i + CHUNK_SIZE);
+      const pageRangeStr = `Pages ${i + 1} to ${i + chunkPages.length}`;
+      const chunkText = chunkPages.map((p, idx) => `=== PAGE ${i + idx + 1} ===\n${p}`).join('\n\n');
+
+      console.log(`[Bank Statement] Extracting transactions from ${pageRangeStr}...`);
+
+      const pagePrompt = `You are an expert Indian bank statement table extractor.
+Extract EVERY SINGLE transaction row present in the statement text below for ${pageRangeStr}.
+
+CRITICAL INSTRUCTIONS:
+1. DO NOT SKIP, OMIT, OR SUMMARIZE ANY TRANSACTION ROW. Every line in the table is an individual transaction.
+2. For each transaction row:
+   - "date": Date formatted as YYYY-MM-DD.
+   - "voucherType":
+       * Debited / Withdrawal / Dr -> "Payment"
+       * Credited / Deposit / Cr -> "Receipt"
+       * Cash Deposit / ATM Withdrawal / Self-Transfer -> "Contra"
+       * Bank Charges / SMS Fees / GST on Fees -> "Payment"
+       * Interest Credited -> "Receipt"
+   - "partyName": Counter-party vendor/client/source extracted cleanly from narration (e.g. "UPI/123/RAMESH" -> "RAMESH", "NEFT-ABC CORP" -> "ABC CORP", "CHG: CONSOLIDATED CHARGES" -> "Bank Charges", "INT COLL" -> "Interest Received", "ATM WDL" -> "Cash"). If not identifiable, set null.
+   - "amount": Transaction amount (positive number).
+   - "narration": Full, clean transaction description.
+   - "referenceNumber": UTR / Cheque / Ref / UPI transaction id if visible, otherwise null.
+   - "confidence": 1.0.
+   - "reason": Brief classification reason.
+
+Return strictly a JSON array of objects matching this schema:
+[
+  {
+    "date": "YYYY-MM-DD",
+    "voucherType": "Payment" | "Receipt" | "Contra" | "Journal",
+    "partyName": "Counterparty Name" | null,
+    "amount": 1000.00,
+    "narration": "Full narration text",
+    "referenceNumber": "UTR/Ref/Cheque" | null,
+    "confidence": 1.0,
+    "reason": "Debit from vendor"
+  }
+]
+
+--- ${pageRangeStr} STATEMENT TEXT ---
+${chunkText}`;
+
+      try {
+        const txns = await callGeminiJson(pagePrompt, 65536);
+        if (Array.isArray(txns)) {
+          console.log(`[Bank Statement] Extracted ${txns.length} transactions from ${pageRangeStr}.`);
+          for (const t of txns) {
+            if (!t || isHeaderOrSummaryRow(t)) continue;
+            const amt = cleanAmount(t.amount);
+            if (amt <= 0) continue;
+
+            const normD = normalizeDate(t.date);
+            allTransactions.push({
+              date: normD,
+              voucherType: (t.voucherType || 'Payment') as any,
+              partyName: t.partyName || null,
+              partyLedger: t.partyLedger || null,
+              amount: amt,
+              bankLedger: detectedBank,
+              narration: t.narration || '',
+              referenceNumber: t.referenceNumber || null,
+              confidence: Number(t.confidence) || 1.0,
+              reason: t.reason || ''
+            });
+          }
+        }
+      } catch (err: any) {
+        console.error(`[Bank Statement] Failed to extract from ${pageRangeStr}:`, err.message);
+      }
+    }
+
+    console.log(`[Bank Statement] Total extracted transactions across ${pages.length} page(s): ${allTransactions.length}`);
+
+    return {
+      bankName: detectedBank,
+      accountType: detectedAccountType,
+      accountNumber: headerInfo.accountNumber || '',
+      ifsc: headerInfo.ifsc || '',
+      openingBalance: cleanAmount(headerInfo.openingBalance),
+      closingBalance: cleanAmount(headerInfo.closingBalance),
+      statementPeriod: headerInfo.statementPeriod || null,
+      transactions: allTransactions
+    };
+  }
+
+  // Fallback for scanned image PDF or binary file buffer
+  console.log('[Bank Statement] Falling back to direct multimodal binary PDF parsing...');
+  const baseInstructions = `You are an expert accountant with deep knowledge of Tally Prime and Indian banking systems.
+Analyze this bank statement document and convert EVERY SINGLE transaction into structured banking data.
+
+CRITICAL INSTRUCTIONS:
+1. Extract EVERY single transaction row without skipping, omitting, or summarizing ANY row.
+2. Extract the Bank Name, Account Type (Savings Account / Current Account / Overdraft Account), Account Number, IFSC, Opening Balance, Closing Balance, and Statement Period.
+3. For each transaction:
+   - "date": YYYY-MM-DD format.
+   - "voucherType": Payment (withdrawals/debits), Receipt (deposits/credits), Contra (cash/transfers), or Journal.
+   - "partyName": Counter-party / vendor / client / service name from narration.
+   - "amount": Transaction amount (positive number).
+   - "bankLedger": Identified bank name.
+   - "narration": Full narration.
+   - "referenceNumber": UTR / Cheque / UPI ID.
+   - "confidence": 1.0.
+   - "reason": Short reason.
 
 Return strictly valid JSON following the schema.`;
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
-
-    let contentsParts: any[] = [];
-    if (extractedText.length > 100) {
-      contentsParts = [
-        { text: `${baseInstructions}\n\n--- BANK STATEMENT TEXT CONTENT ---\n${extractedText}` }
-      ];
-    } else {
-      contentsParts = [
-        { text: baseInstructions },
-        { inlineData: { data: buffer.toString('base64'), mimeType: mimeType || 'application/pdf' } }
-      ];
-    }
-
+    const model = getModel();
     const result = await model.generateContent({
-      contents: [{ role: 'user', parts: contentsParts }],
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: baseInstructions },
+            { inlineData: { data: buffer.toString('base64'), mimeType: mimeType || 'application/pdf' } }
+          ]
+        }
+      ],
       generationConfig: {
         responseMimeType: 'application/json',
-        responseSchema: bankStatementExtractionSchema as any
+        responseSchema: bankStatementExtractionSchema as any,
+        maxOutputTokens: 65536,
+        temperature: 0.1
       }
     });
 
     const responseText = result.response.text();
-    if (!responseText) {
-      throw new Error('Gemini returned empty content.');
-    }
+    if (!responseText) throw new Error('Gemini returned empty content.');
 
-    return parseGeminiJson<ExtractedBankStatementInfo>(responseText);
-  } catch (error: any) {
-    console.error('Gemini bank statement extraction error:', error.message || error);
-    try {
-      console.log('Retrying bank statement extraction with gemini-3.1-flash-lite fallback...');
-      const fallbackModel = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
-      
-      let fallbackParts: any[] = [];
-      if (extractedText.length > 100) {
-        fallbackParts = [
-          { text: `Extract bankName, accountNumber, openingBalance, closingBalance, statementPeriod, and all transactions as JSON with date (YYYY-MM-DD), voucherType (Payment/Receipt/Contra/Journal), partyName, amount, bankLedger, narration, referenceNumber, confidence, reason from this text:\n\n${extractedText}` }
-        ];
-      } else {
-        fallbackParts = [
-          { text: `Extract bankName, accountNumber, openingBalance, closingBalance, statementPeriod, and all transactions as JSON with date (YYYY-MM-DD), voucherType (Payment/Receipt/Contra/Journal), partyName, amount, bankLedger, narration, referenceNumber, confidence, reason.` },
-          { inlineData: { data: buffer.toString('base64'), mimeType: mimeType || 'application/pdf' } }
-        ];
-      }
+    const parsed = parseGeminiJson<ExtractedBankStatementInfo>(responseText);
+    const cleanedTxns = (parsed.transactions || [])
+      .filter(t => !isHeaderOrSummaryRow(t) && cleanAmount(t.amount) > 0)
+      .map(t => ({
+        ...t,
+        date: normalizeDate(t.date),
+        amount: cleanAmount(t.amount),
+        bankLedger: (t.bankLedger || parsed.bankName || 'Bank Account').trim()
+      }));
 
-      const fallbackResult = await fallbackModel.generateContent({
-        contents: [{ role: 'user', parts: fallbackParts }],
-        generationConfig: { responseMimeType: 'application/json' }
-      });
-      return parseGeminiJson<ExtractedBankStatementInfo>(fallbackResult.response.text());
-    } catch (fallbackError: any) {
-      throw new Error(`Gemini bank statement extraction failed: ${fallbackError.message || error.message || error}`);
-    }
+    return {
+      ...parsed,
+      accountType: parsed.accountType || 'Current Account',
+      openingBalance: cleanAmount(parsed.openingBalance),
+      closingBalance: cleanAmount(parsed.closingBalance),
+      transactions: cleanedTxns
+    };
+  } catch (fallbackError: any) {
+    console.error('Multimodal extraction error:', fallbackError);
+    throw new Error(`Bank statement extraction failed: ${fallbackError.message || fallbackError}`);
   }
 }
 

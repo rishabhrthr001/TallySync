@@ -4,16 +4,32 @@ const axios = require('axios');
  * CONFIGURATION
  */
 const CONFIG = {
-    BACKEND_URL: process.env.BACKEND_URL || 'https://photobill-backend-1020363630918.asia-south1.run.app',
+    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:3000',
     TALLY_URL: process.env.TALLY_URL || 'http://127.0.0.1:9000',
     EMAIL: process.env.AGENT_EMAIL || 'pankaj@photoBill.com',
     PASSWORD: process.env.AGENT_PASSWORD || 'pankaj@9999',
-    POLL_INTERVAL: 10000,
-    RETRY_DELAY: 5000,
-    FORCE_EDUCATIONAL_DATES: process.env.FORCE_EDUCATIONAL_DATES === 'true' || false, // Set to true if using unlicensed Tally (Educational Mode) which only allows 1st, 2nd, and 31st
+    POLL_INTERVAL: 5000,
+    RETRY_DELAY: 3000,
+    FORCE_EDUCATIONAL_DATES: process.env.FORCE_EDUCATIONAL_DATES === 'true' || false,
 };
 
 let AUTH_TOKEN = null;
+
+function isCompanyMatch(entryCompany, activeCompany) {
+    if (!entryCompany || !activeCompany) return true;
+    const c1 = entryCompany.trim().toLowerCase();
+    const c2 = activeCompany.trim().toLowerCase();
+    if (c1 === c2) return true;
+    
+    // Normalize by stripping (from ...) financial year suffixes and extra dashes/spaces
+    const norm = (s) => s.replace(/\(from[^\)]*\)/gi, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    const n1 = norm(c1);
+    const n2 = norm(c2);
+    if (n1 === n2 || n1.startsWith(n2) || n2.startsWith(n1) || n1.includes(n2) || n2.includes(n1)) {
+        return true;
+    }
+    return false;
+}
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
@@ -434,9 +450,15 @@ function fmtQty(qty, unit = 'Nos') {
 }
 
 function buildEnvelope(entry, voucherType, dateStr, bodyXml, objView = '', forcedDate = false, tallyGuid = null) {
-    let narration = entry.items && entry.items.length > 0
-        ? `${voucherType} ${entry.invoiceNumber}: ${entry.items.map(i => `${i.name} x${i.quantity}`).join(', ')} — via TallySync`
-        : `${voucherType} ${entry.invoiceNumber} — via TallySync`;
+    const bankTypes = ['payment', 'receipt', 'contra', 'journal'];
+    let narration = '';
+    if (entry.type && bankTypes.includes(entry.type.toLowerCase())) {
+        narration = `${voucherType} Voucher ${entry.invoiceNumber}`;
+    } else {
+        narration = entry.items && entry.items.length > 0
+            ? `${voucherType} ${entry.invoiceNumber}: ${entry.items.map(i => `${i.name} x${i.quantity}`).join(', ')} — via TallySync`
+            : `${voucherType} ${entry.invoiceNumber} — via TallySync`;
+    }
 
     if (forcedDate) {
         narration += ` (Original Date: ${entry.date} adjusted to 1st of month for Educational Mode compatibility)`;
@@ -615,6 +637,11 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
     else if (entry.type === 'contra') voucherType = 'Contra';
     else if (entry.type === 'journal') voucherType = 'Journal';
 
+    // Matched transactions get a BANKDATE tag to be marked as Reconciled / Cleared in Tally Company Books.
+    // Unmatched / Mismatched / Suspense transactions omit BANKDATE so Tally lists them in "Unreconciled transactions from this date to this date".
+    const isReconciled = entry.reconStatus === 'MATCHED' && !entry.isSuspenseRedirect && partyLedger.toLowerCase() !== 'suspense';
+    const bankDateTag = isReconciled ? `\n                            <BANKDATE>${dateStr}</BANKDATE>` : '';
+
     // For journal entries, we don't use bank view — keep the old accounting style
     if (entry.type === 'journal') {
         const body = `
@@ -627,7 +654,7 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                         <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>${bankDateTag}
                         </LEDGERENTRIES.LIST>`;
         return buildEnvelope(entry, voucherType, dateStr, body, 'Accounting Voucher View', forceFirstOfMonth, entry.tallyGuid);
     }
@@ -636,7 +663,7 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
     // IMPORTANT: DO NOT use ALLLEDGERENTRIES.LIST + BANKALLOCATIONS.LIST
     // That advanced bank view crashes Tally with memory access violation unless
     // the ledger is fully configured as a bank in Tally settings.
-    // Use plain LEDGERENTRIES.LIST — always works, never crashes.
+    // Use plain LEDGERENTRIES.LIST with optional BANKDATE — always works, never crashes.
     // -----------------------------------------------------------------------
 
     let body;
@@ -648,7 +675,7 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                         <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>
+                            <AMOUNT>${amount.toFixed(2)}</AMOUNT>${bankDateTag}
                         </LEDGERENTRIES.LIST>
                         <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
@@ -662,7 +689,7 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                         <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
+                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>${bankDateTag}
                         </LEDGERENTRIES.LIST>
                         <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(partyLedger)}</LEDGERNAME>
@@ -680,7 +707,7 @@ function generateBankAccountingVoucherXML(entry, partyLedger, bankLedger, forceF
                         <LEDGERENTRIES.LIST>
                             <LEDGERNAME>${escapeXML(bankLedger)}</LEDGERNAME>
                             <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>
+                            <AMOUNT>-${amount.toFixed(2)}</AMOUNT>${bankDateTag}
                         </LEDGERENTRIES.LIST>`;
     }
 
@@ -774,61 +801,90 @@ async function syncEntry(entry) {
     // Resolve exact Tally company name once
     entry.companyName = await resolveCompanyName(entry.companyName);
 
+    // If action is SKIP, complete immediately without sending XML to Tally
+    if (entry.action === 'skip') {
+        console.log(`[SYNC] Entry ${entry.invoiceNumber} is marked as SKIP. Skipping Tally post.`);
+        await updateBackendStatus(entry._id, 'success');
+        return;
+    }
+
     const bankVoucherTypes = ['payment', 'receipt', 'contra', 'journal'];
     if (bankVoucherTypes.includes(entry.type.toLowerCase())) {
-        console.log(`[SYNC] Handling bank statement/accounting-only voucher: ${entry.type}`);
+        const isAlter = entry.action === 'alter' || Boolean(entry.tallyGuid);
+        console.log(`[SYNC] Handling bank voucher (${isAlter ? 'ALTER' : 'CREATE'}): ${entry.type} (${entry.invoiceNumber})`);
         try {
             // 1. Fetch current Tally ledger list
             const masterData = await getLedgerList(entry.companyName);
 
-            // 2. Resolve/create party ledger and bank ledger
+            // 2. Resolve bank ledger and party ledger
             const bankName = (entry.bankLedger || 'Bank Account').trim();
-            const partyName = (entry.partyName || 'Bank Adjustments').trim();
-            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Party: "${partyName}"`);
+            const partyName = (entry.partyName || 'Suspense').trim();
+            const accountType = (entry.accountType || '').toLowerCase();
+            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Account Type: "${entry.accountType || 'Current Account'}", Party: "${partyName}"`);
 
-            const ledgersNeeded = [];
-
-            // Determine groups
-            let bankGroup = 'Bank Accounts';
-            if (bankName.toLowerCase().includes('cash')) {
-                bankGroup = 'Cash-in-hand';
+            // Resolve bank ledger name: check if exists in Tally
+            const bankExact = findExactName(masterData, bankName);
+            let bankResolved = bankName;
+            if (bankExact) {
+                bankResolved = bankExact;
+                console.log(`[BANK SYNC] ✅ Bank ledger name matches existing Tally ledger: "${bankExact}". Pushing all details into that bank ledger.`);
+            } else {
+                let bankGroup = 'Bank Accounts';
+                if (accountType.includes('od') || accountType.includes('overdraft')) {
+                    bankGroup = 'Bank OD A/c';
+                } else if (accountType.includes('occ') || accountType.includes('cash credit') || accountType.includes('cc')) {
+                    bankGroup = 'Bank OCC A/c';
+                } else if (bankName.toLowerCase().includes('cash')) {
+                    bankGroup = 'Cash-in-hand';
+                }
+                console.log(`[BANK SYNC] ⚠️ Bank ledger "${bankName}" does not match any existing ledger. Creating new bank ledger under "${bankGroup}"...`);
+                await upsertLedger(entry.companyName, bankName, bankGroup, '', false);
+                bankResolved = bankName;
+                console.log(`[BANK SYNC] ✅ Created new bank ledger "${bankName}" in Tally. Pushing all details into it.`);
             }
 
-            let partyGroup = 'Sundry Creditors'; // default for payment
-            if (entry.type === 'receipt') {
-                partyGroup = 'Sundry Debtors';
-            } else if (entry.type === 'contra') {
-                partyGroup = 'Bank Accounts'; // Contra is bank-to-bank or cash-to-bank
-                if (partyName.toLowerCase().includes('cash')) {
-                    partyGroup = 'Cash-in-hand';
-                }
-            } else if (entry.type === 'journal') {
-                partyGroup = 'Indirect Expenses'; // default for journal charges
-            }
+            // Resolve party ledger name
+            let partyResolved = '';
+            let isSuspenseRedirect = false;
+            const originalPartyName = entry.bankPartyName || partyName;
 
-            ledgersNeeded.push({ name: bankName, group: bankGroup });
-            ledgersNeeded.push({ name: partyName, group: partyGroup });
-
-            const resolvedNames = {};
-            for (const led of ledgersNeeded) {
-                const nameLower = led.name.toLowerCase();
-                if (['cash', 'bank', 'profit & loss'].includes(nameLower)) {
-                    resolvedNames[led.name] = led.name;
-                    continue;
-                }
-
-                const exactName = findExactName(masterData, led.name);
-                if (exactName) {
-                    resolvedNames[led.name] = exactName;
+            if (partyName.toLowerCase() === 'suspense') {
+                const suspenseExact = findExactName(masterData, 'Suspense');
+                if (suspenseExact) {
+                    partyResolved = suspenseExact;
                 } else {
-                    console.log(`[LEDGER] Not found in Tally, creating: "${led.name}" under "${led.group}"`);
-                    await upsertLedger(entry.companyName, led.name, led.group, '', false);
-                    resolvedNames[led.name] = led.name;
+                    console.log(`[LEDGER] Suspense ledger not found in Tally, creating it under Suspense Accounts...`);
+                    await upsertLedger(entry.companyName, 'Suspense', 'Suspense Accounts', '', false);
+                    partyResolved = 'Suspense';
+                }
+            } else {
+                const exactName = findExactName(masterData, partyName);
+                if (exactName) {
+                    partyResolved = exactName;
+                } else {
+                    // Party name does NOT match any existing ledger in Tally!
+                    // DO NOT create a new normal ledger simply because a bank party does not exist.
+                    console.log(`[BANK SYNC] Mapped party "${partyName}" not found in Tally. Redirecting to Suspense ledger.`);
+                    const suspenseExact = findExactName(masterData, 'Suspense');
+                    if (suspenseExact) {
+                        partyResolved = suspenseExact;
+                    } else {
+                        console.log(`[LEDGER] Suspense ledger not found in Tally, creating it under Suspense Accounts...`);
+                        await upsertLedger(entry.companyName, 'Suspense', 'Suspense Accounts', '', false);
+                        partyResolved = 'Suspense';
+                    }
+                    isSuspenseRedirect = true;
                 }
             }
 
-            const bankResolved = resolvedNames[bankName];
-            const partyResolved = resolvedNames[partyName];
+            // Enrich narration to preserve original party, reference, bank, and notes
+            const originalNotes = entry.bankNarration || entry.notes || '';
+            const refStr = entry.invoiceNumber ? ` | Ref: ${entry.invoiceNumber}` : '';
+            if (partyResolved.toLowerCase() === 'suspense' || isSuspenseRedirect) {
+                entry.notes = `[Bank Statement Entry] Original Party: ${originalPartyName}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
+            } else {
+                entry.notes = `[Bank Statement Entry] Party: ${partyResolved}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
+            }
 
             // 3. Create Voucher
             const isOk = (r) => r.includes('<CREATED>1</CREATED>') || r.includes('<ALTERED>1</ALTERED>');
@@ -840,7 +896,7 @@ async function syncEntry(entry) {
             console.log(`[DEBUG RESPONSE]\n${bankResponse}`);
 
             if (bankResponse.includes('Voucher date is missing')) {
-                console.warn(`[VOUCHER] ⚠️  Tally date error detected. Retrying with 1st of the month...`);
+                console.warn(`[VOUCHER] ⚠️  Tally date error detected. Likely Educational Mode restriction. Retrying with 1st of the month...`);
                 const retryXml = generateBankAccountingVoucherXML(entry, partyResolved, bankResolved, true);
                 bankResponse = await tallyRequest(retryXml);
                 console.log(`[DEBUG RESPONSE RETRY]\n${bankResponse}`);
@@ -1684,8 +1740,8 @@ async function run() {
             for (const [companyName, bills] of Object.entries(companyGroups)) {
                 if (companyName === 'Unknown') continue;
                 
-                if (!activeCompany || companyName.trim().toLowerCase() !== activeCompany.trim().toLowerCase()) {
-                    console.log(`[SKIP] Skipping bills for company "${companyName}" since it does not match currently active company in Tally ("${activeCompany || 'None'}"). Keeping in pending.`);
+                if (activeCompany && !isCompanyMatch(companyName, activeCompany)) {
+                    console.log(`[SKIP] Skipping bills for company "${companyName}" since it does not match currently active company in Tally ("${activeCompany}"). Keeping in pending.`);
                     continue;
                 }
                 

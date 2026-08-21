@@ -22,9 +22,16 @@ const entrySchema = new mongoose.Schema({
   gstType: { type: String, enum: ['cgst-sgst', 'igst'], default: 'cgst-sgst' },
   status: { type: String, enum: ['pending', 'success', 'failed'], default: 'pending' },
   bankLedger: { type: String, default: '' },
+  accountType: { type: String, default: 'Current Account' },
+  partyGuid: { type: String, default: '' },
+  tallyGuid: { type: String, default: '' },
+  action: { type: String, enum: ['create', 'alter', 'skip'], default: 'create' },
+  reconStatus: { type: String, default: '' },
+  bankPartyName: { type: String, default: '' },
+  bankNarration: { type: String, default: '' },
   confidence: { type: Number, default: 1.0 },
   reason: { type: String, default: '' },
-  idempotencyKey: { type: String, unique: true },
+  idempotencyKey: { type: String, default: null },
   notes: { type: String, default: '' },
   transporterDetails: {
     vehicleNumber: String,
@@ -35,6 +42,8 @@ const entrySchema = new mongoose.Schema({
   printedAt: { type: Date },
   createdAt: { type: Date, default: Date.now }
 });
+
+entrySchema.index({ companyName: 1, idempotencyKey: 1 }, { sparse: true, unique: true });
 
 const Entry = mongoose.model('Entry', entrySchema);
 export default Entry;

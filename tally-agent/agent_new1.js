@@ -4,16 +4,32 @@ const axios = require('axios');
  * CONFIGURATION
  */
 const CONFIG = {
-    BACKEND_URL: process.env.BACKEND_URL || 'https://photobill-backend-1020363630918.asia-south1.run.app',
+    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:3000',
     TALLY_URL: process.env.TALLY_URL || 'http://127.0.0.1:9000',
     EMAIL: process.env.AGENT_EMAIL || 'pankaj@photoBill.com',
     PASSWORD: process.env.AGENT_PASSWORD || 'pankaj@9999',
-    POLL_INTERVAL: 10000,
-    RETRY_DELAY: 5000,
-    FORCE_EDUCATIONAL_DATES: process.env.FORCE_EDUCATIONAL_DATES === 'true' || false, // Set to true if using unlicensed Tally (Educational Mode) which only allows 1st, 2nd, and 31st
+    POLL_INTERVAL: 5000,
+    RETRY_DELAY: 3000,
+    FORCE_EDUCATIONAL_DATES: process.env.FORCE_EDUCATIONAL_DATES === 'true' || false,
 };
 
 let AUTH_TOKEN = null;
+
+function isCompanyMatch(entryCompany, activeCompany) {
+    if (!entryCompany || !activeCompany) return true;
+    const c1 = entryCompany.trim().toLowerCase();
+    const c2 = activeCompany.trim().toLowerCase();
+    if (c1 === c2) return true;
+    
+    // Normalize by stripping (from ...) financial year suffixes and extra dashes/spaces
+    const norm = (s) => s.replace(/\(from[^\)]*\)/gi, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    const n1 = norm(c1);
+    const n2 = norm(c2);
+    if (n1 === n2 || n1.startsWith(n2) || n2.startsWith(n1) || n1.includes(n2) || n2.includes(n1)) {
+        return true;
+    }
+    return false;
+}
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
@@ -825,13 +841,18 @@ async function syncEntry(entry) {
             // 2. Resolve/create party ledger and bank ledger
             const bankName = (entry.bankLedger || 'Bank Account').trim();
             const partyName = (entry.partyName || 'Bank Adjustments').trim();
-            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Party: "${partyName}"`);
+            const accountType = (entry.accountType || '').toLowerCase();
+            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Account Type: "${entry.accountType || 'Current Account'}", Party: "${partyName}"`);
 
             const ledgersNeeded = [];
 
             // Determine groups
             let bankGroup = 'Bank Accounts';
-            if (bankName.toLowerCase().includes('cash')) {
+            if (accountType.includes('od') || accountType.includes('overdraft')) {
+                bankGroup = 'Bank OD A/c';
+            } else if (accountType.includes('occ') || accountType.includes('cash credit') || accountType.includes('cc')) {
+                bankGroup = 'Bank OCC A/c';
+            } else if (bankName.toLowerCase().includes('cash')) {
                 bankGroup = 'Cash-in-hand';
             }
 
@@ -847,8 +868,8 @@ async function syncEntry(entry) {
                 partyGroup = 'Indirect Expenses'; // default for journal charges
             }
 
-            ledgersNeeded.push({ name: bankName, group: bankGroup });
-            ledgersNeeded.push({ name: partyName, group: partyGroup });
+            ledgersNeeded.push({ name: bankName, group: bankGroup, isBank: true });
+            ledgersNeeded.push({ name: partyName, group: partyGroup, isBank: false });
 
             const resolvedNames = {};
             for (const led of ledgersNeeded) {
@@ -861,10 +882,16 @@ async function syncEntry(entry) {
                 const exactName = findExactName(masterData, led.name);
                 if (exactName) {
                     resolvedNames[led.name] = exactName;
+                    if (led.isBank) {
+                        console.log(`[BANK SYNC] ✅ Bank ledger "${led.name}" matches Tally ledger "${exactName}". Pushing all details into it.`);
+                    }
                 } else {
-                    console.log(`[LEDGER] Not found in Tally, creating: "${led.name}" under "${led.group}"`);
+                    console.log(`[LEDGER] "${led.name}" not found in Tally, creating under "${led.group}"`);
                     await upsertLedger(entry.companyName, led.name, led.group, '', false);
                     resolvedNames[led.name] = led.name;
+                    if (led.isBank) {
+                        console.log(`[BANK SYNC] ✅ Created new bank ledger "${led.name}" in Tally under "${led.group}". Pushing all details into it.`);
+                    }
                 }
             }
 
@@ -1712,8 +1739,8 @@ async function run() {
             for (const [companyName, bills] of Object.entries(companyGroups)) {
                 if (companyName === 'Unknown') continue;
                 
-                if (!activeCompany || companyName.trim().toLowerCase() !== activeCompany.trim().toLowerCase()) {
-                    console.log(`[SKIP] Skipping bills for company "${companyName}" since it does not match currently active company in Tally ("${activeCompany || 'None'}"). Keeping in pending.`);
+                if (activeCompany && !isCompanyMatch(companyName, activeCompany)) {
+                    console.log(`[SKIP] Skipping bills for company "${companyName}" since it does not match currently active company in Tally ("${activeCompany}"). Keeping in pending.`);
                     continue;
                 }
                 

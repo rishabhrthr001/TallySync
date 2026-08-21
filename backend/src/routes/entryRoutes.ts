@@ -633,6 +633,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
     }
     const rawTransactions = data.transactions || [];
     const detectedBank = (data.bankName || 'Bank Account').trim();
+    const detectedAccountType = req.body.accountType || data.accountType || 'Current Account';
 
     const formattedTransactions = rawTransactions.map((txn: any) => {
       const lowercaseType = (txn.voucherType || 'Payment').toLowerCase();
@@ -655,7 +656,8 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
         notes: txn.narration || '',
         confidence: txn.confidence || 1.0,
         reason: txn.reason || '',
-        bankLedger: (txn.bankLedger || detectedBank).trim()
+        bankLedger: (txn.bankLedger || detectedBank).trim(),
+        accountType: detectedAccountType
       };
     });
 
@@ -663,6 +665,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
       success: true, 
       count: formattedTransactions.length, 
       bankName: detectedBank,
+      accountType: detectedAccountType,
       accountNumber: data.accountNumber || '',
       ifsc: data.ifsc || '',
       openingBalance: data.openingBalance || 0,
@@ -688,23 +691,45 @@ router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, re
   try {
     for (const txn of transactions) {
       const lowercaseType = txn.type ? txn.type.toLowerCase() : 'payment';
-      const refNum = txn.invoiceNumber || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`;
-      const idempotencyKey = `${req.user.companyName}-${refNum}-${txn.totalAmount}-${txn.date}`;
+      const rawRef = (txn.referenceNumber || txn.invoiceNumber || '').trim();
+      const hasRealRef = rawRef && !rawRef.startsWith('TXN-');
+      const refNum = rawRef || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`;
+      const assignedBankLedger = (txn.bankLedger || bankName || 'Bank Account').trim();
+      const normNarration = (txn.notes || txn.narration || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 40);
+
+      // Robust fingerprint without amount (Company + Bank + UTR/Ref or Date + Direction + Narration)
+      const idempotencyKey = hasRealRef
+        ? `${req.user.companyName}-${assignedBankLedger}-${rawRef}`.toLowerCase()
+        : `${req.user.companyName}-${assignedBankLedger}-${txn.date}-${lowercaseType}-${normNarration}`.toLowerCase();
 
       // Check if entry already exists (prevent duplicate entries)
       const existing = await Entry.findOne({ idempotencyKey, companyName: req.user.companyName });
       if (existing) {
-        createdEntries.push(existing);
+        // If it was marked as alter and existing is found, update amount & tallyGuid if provided
+        if (txn.action === 'alter' && txn.tallyGuid) {
+          existing.totalAmount = txn.totalAmount;
+          existing.taxableAmount = txn.totalAmount;
+          existing.tallyGuid = txn.tallyGuid;
+          existing.action = 'alter';
+          existing.status = 'pending';
+          await existing.save();
+          createdEntries.push(existing);
+        } else {
+          createdEntries.push(existing);
+        }
         continue;
       }
 
-      const assignedBankLedger = (txn.bankLedger || bankName || 'Bank Account').trim();
+      const action = txn.action || 'create';
+      // If action is 'skip' (e.g. MATCHED in Tally already), record in DB as success/reconciled without queuing for Tally push
+      const status = action === 'skip' ? 'success' : 'pending';
 
       const newEntry = new Entry({
         userId: req.user.id,
         companyName: req.user.companyName,
         type: lowercaseType,
-        partyName: txn.partyName || 'Bank Adjustments',
+        partyName: txn.partyName || 'Suspense',
+        partyGuid: txn.partyGuid || '',
         partyGstin: '',
         invoiceNumber: refNum,
         date: txn.date,
@@ -713,8 +738,14 @@ router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, re
         taxAmount: 0,
         totalAmount: txn.totalAmount,
         gstType: 'cgst-sgst',
-        status: 'pending',
+        status,
+        action,
+        tallyGuid: txn.tallyGuid || '',
+        reconStatus: txn.reconStatus || '',
+        bankPartyName: txn.bankPartyName || txn.originalPartyName || txn.partyName || '',
+        bankNarration: txn.bankNarration || txn.notes || '',
         bankLedger: assignedBankLedger,
+        accountType: txn.accountType || req.body.accountType || 'Current Account',
         notes: txn.notes || 'Bulk imported bank transaction',
         idempotencyKey
       });
@@ -722,19 +753,21 @@ router.post('/bulk', authenticateToken, checkDailyBillLimit, async (req: any, re
       await newEntry.save();
       createdEntries.push(newEntry);
 
-      // Update/Create Ledger
-      const multiplier = (lowercaseType === 'sales' || lowercaseType === 'receipt') ? 1 : -1;
-      await Ledger.findOneAndUpdate(
-        { companyName: req.user.companyName, partyName: newEntry.partyName },
-        { 
-          $inc: { balance: newEntry.totalAmount * multiplier }, 
-          $set: { 
-            updatedAt: new Date(), 
-            userId: req.user.id
-          } 
-        },
-        { upsert: true }
-      );
+      // Update/Create local MongoDB Ledger tracking
+      if (newEntry.partyName && newEntry.partyName !== 'Suspense') {
+        const multiplier = (lowercaseType === 'sales' || lowercaseType === 'receipt') ? 1 : -1;
+        await Ledger.findOneAndUpdate(
+          { companyName: req.user.companyName, partyName: newEntry.partyName },
+          { 
+            $inc: { balance: newEntry.totalAmount * multiplier }, 
+            $set: { 
+              updatedAt: new Date(), 
+              userId: req.user.id
+            } 
+          },
+          { upsert: true }
+        );
+      }
     }
 
     res.json({ success: true, count: createdEntries.length, data: createdEntries });
