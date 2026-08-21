@@ -1025,32 +1025,45 @@ async function syncEntry(entry) {
                     partyResolved = 'UPI';
                     console.log(`[BANK SYNC] ✅ Created "UPI" ledger in Tally.`);
                 }
-            } else if (partyName.toLowerCase() === 'suspense') {
-                const suspenseExact = findExactName(masterData, 'Suspense');
+            } else if (partyName.toLowerCase() === 'suspense' || partyName.toLowerCase() === 'suspense a/c') {
+                const suspenseExact = findExactName(masterData, 'Suspense') || findExactName(masterData, 'Suspense A/c');
                 if (suspenseExact) {
                     partyResolved = suspenseExact;
                 } else {
                     console.log(`[LEDGER] Suspense ledger not found in Tally, creating it under Suspense Accounts...`);
-                    await upsertLedger(entry.companyName, 'Suspense', 'Suspense Accounts', '', false);
-                    partyResolved = 'Suspense';
+                    await upsertLedger(entry.companyName, 'Suspense A/c', 'Suspense Accounts', '', false);
+                    partyResolved = 'Suspense A/c';
                 }
             } else {
                 const exactName = findExactName(masterData, partyName);
                 if (exactName) {
                     partyResolved = exactName;
+                    console.log(`[BANK SYNC] ✅ Matched existing Tally ledger: "${exactName}".`);
                 } else {
-                    // Party name does NOT match any existing ledger in Tally!
-                    // DO NOT create a new normal ledger simply because a bank party does not exist.
-                    console.log(`[BANK SYNC] Mapped party "${partyName}" not found in Tally. Redirecting to Suspense ledger.`);
-                    const suspenseExact = findExactName(masterData, 'Suspense');
-                    if (suspenseExact) {
-                        partyResolved = suspenseExact;
+                    // Party name not found in Tally: Attempt to auto-create ledger in Tally first!
+                    let partyGroup = 'Sundry Creditors';
+                    if (entry.type === 'receipt') partyGroup = 'Sundry Debtors';
+                    else if (entry.type === 'contra') partyGroup = partyName.toLowerCase().includes('cash') ? 'Cash-in-hand' : 'Bank Accounts';
+                    else if (entry.type === 'journal') partyGroup = 'Indirect Expenses';
+
+                    console.log(`[BANK SYNC] Party "${partyName}" not found in Tally. Attempting to auto-create ledger under "${partyGroup}"...`);
+                    const created = await upsertLedger(entry.companyName, partyName, partyGroup, '', false);
+
+                    if (created) {
+                        partyResolved = partyName;
+                        console.log(`[BANK SYNC] ✅ Successfully created ledger: "${partyName}" (${partyGroup}).`);
                     } else {
-                        console.log(`[LEDGER] Suspense ledger not found in Tally, creating it under Suspense Accounts...`);
-                        await upsertLedger(entry.companyName, 'Suspense', 'Suspense Accounts', '', false);
-                        partyResolved = 'Suspense';
+                        // If unable to create ledger, fallback gracefully to Suspense A/c
+                        console.warn(`[BANK SYNC] ⚠️ Unable to create ledger "${partyName}". Falling back to Suspense ledger with full narration details.`);
+                        const suspenseExact = findExactName(masterData, 'Suspense') || findExactName(masterData, 'Suspense A/c');
+                        if (suspenseExact) {
+                            partyResolved = suspenseExact;
+                        } else {
+                            await upsertLedger(entry.companyName, 'Suspense A/c', 'Suspense Accounts', '', false);
+                            partyResolved = 'Suspense A/c';
+                        }
+                        isSuspenseRedirect = true;
                     }
-                    isSuspenseRedirect = true;
                 }
             }
 
@@ -1063,8 +1076,8 @@ async function syncEntry(entry) {
 
             if (isUpi) {
                 entry.notes = `[UPI] Party: ${partyDisplayName || 'Counterparty'}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
-            } else if (partyResolved.toLowerCase() === 'suspense' || isSuspenseRedirect) {
-                entry.notes = `[Bank Statement Entry] Original Party: ${originalPartyName || partyName}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
+            } else if (isSuspenseRedirect || partyResolved.toLowerCase().includes('suspense')) {
+                entry.notes = `[Unmapped / Suspense Posting] Original Party: ${originalPartyName || partyName}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
             } else {
                 entry.notes = `[Bank Statement Entry] Party: ${partyResolved}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
             }
@@ -1092,9 +1105,23 @@ async function syncEntry(entry) {
                 const errMatch = bankResponse.match(/<LINEERROR>(.*?)<\/LINEERROR>/is)
                     || bankResponse.match(/<DESCRIPTION>(.*?)<\/DESCRIPTION>/is);
                 const errMsg = errMatch ? errMatch[1].replace(/\s+/g, ' ').trim() : 'Accounting voucher creation failed';
-                console.error(`[VOUCHER] ❌ FAILED: ${entry.invoiceNumber} — ${errMsg}`);
-                await updateBackendStatus(entry._id, 'failed', errMsg);
-                return;
+
+                // If error is due to missing ledger, retry with Suspense A/c fallback
+                const isLedgerErr = /does not exist|not found|No matching object|cannot find ledger|Unknown ledger|Vch entries failed/i.test(errMsg);
+                if (isLedgerErr && !partyResolved.toLowerCase().includes('suspense')) {
+                    console.warn(`[VOUCHER] ⚠️ Ledger error "${errMsg}" on party "${partyResolved}". Retrying voucher with "Suspense A/c"...`);
+                    await upsertLedger(entry.companyName, 'Suspense A/c', 'Suspense Accounts', '', false);
+                    entry.notes = `[Fallback to Suspense - Ledger "${partyResolved}" unverified in Tally] Original Party: ${originalPartyName || partyName}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
+                    const suspenseRetryXml = generateBankAccountingVoucherXML(entry, 'Suspense A/c', bankResolved, forcedDate);
+                    bankResponse = await tallyRequest(suspenseRetryXml);
+                    console.log(`[DEBUG SUSPENSE RETRY RESPONSE]\n${bankResponse}`);
+                }
+
+                if (!isOk(bankResponse)) {
+                    console.error(`[VOUCHER] ❌ FAILED: ${entry.invoiceNumber} — ${errMsg}`);
+                    await updateBackendStatus(entry._id, 'failed', errMsg);
+                    return;
+                }
             }
 
             console.log(`[VOUCHER] ✅ Accounting voucher created successfully for ${entry.invoiceNumber}`);
