@@ -291,37 +291,146 @@ async function getStockItemList(companyName) {
     }
 }
 
-/** Check if a name exists in a Tally data string (case-insensitive) */
-function findExactName(dataStr, name) {
+function normalizePartyName(str) {
+    if (!str) return '';
+    return str
+        .toLowerCase()
+        .replace(/[\(\)\[\]\{\}\-_,.]/g, ' ')
+        .replace(/\b(ltd|limited|pvt|private|llp|inc|corp|co|enterprises|traders|company|agency|and|&|a\/c|ac)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function levenshteinDistance(a, b) {
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j] + 1
+                );
+            }
+        }
+    }
+    return matrix[b.length][a.length];
+}
+
+function getPartySimilarity(s1, s2) {
+    if (!s1 || !s2) return 0;
+    const n1 = normalizePartyName(s1);
+    const n2 = normalizePartyName(s2);
+    if (n1 === n2) return 1.0;
+    if (!n1 || !n2) return 0;
+
+    const words1 = n1.split(' ').filter(t => t.length > 0);
+    const words2 = n2.split(' ').filter(t => t.length > 0);
+
+    // 1. Primary / Anchor word match (e.g. "chambal" matching "chambal fertilisers")
+    if (words1.length > 0 && words2.length > 0) {
+        const first1 = words1[0];
+        const first2 = words2[0];
+        if (first1 === first2 && first1.length >= 4) {
+            return 0.85 + 0.15 * (Math.min(words1.length, words2.length) / Math.max(words1.length, words2.length));
+        }
+        if (levenshteinDistance(first1, first2) <= 1 && Math.min(first1.length, first2.length) >= 5) {
+            return 0.80 + 0.15 * (Math.min(words1.length, words2.length) / Math.max(words1.length, words2.length));
+        }
+    }
+
+    // 2. Token overlap with fuzzy spelling tolerance
+    let matchedWeight = 0;
+    for (const w1 of words1) {
+        for (const w2 of words2) {
+            if (w1 === w2) {
+                matchedWeight += 1.0;
+                break;
+            } else if (levenshteinDistance(w1, w2) <= 1 && Math.min(w1.length, w2.length) >= 4) {
+                matchedWeight += 0.85;
+                break;
+            } else if (levenshteinDistance(w1, w2) <= 2 && Math.min(w1.length, w2.length) >= 7) {
+                matchedWeight += 0.75;
+                break;
+            }
+        }
+    }
+
+    const tokenScore = (matchedWeight * 2) / (words1.length + words2.length);
+
+    // 3. String containment
+    let containmentScore = 0;
+    if (n1.includes(n2) || n2.includes(n1)) {
+        containmentScore = 0.75 + 0.2 * (Math.min(n1.length, n2.length) / Math.max(n1.length, n2.length));
+    }
+
+    return Math.max(tokenScore, containmentScore);
+}
+
+function extractAllNamesFromXML(dataStr) {
+    if (!dataStr) return [];
+    const names = new Set();
+    const tagMatches = dataStr.matchAll(/<NAME>(.*?)<\/NAME>/gis);
+    for (const m of tagMatches) {
+        const clean = m[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
+        if (clean && !clean.startsWith('$$') && !clean.startsWith('@@')) {
+            names.add(clean);
+        }
+    }
+    const attrMatches = dataStr.matchAll(/NAME="([^"]+)"/gi);
+    for (const m of attrMatches) {
+        const clean = m[1].trim();
+        if (clean && !clean.startsWith('$$') && !clean.startsWith('@@')) {
+            names.add(clean);
+        }
+    }
+    return Array.from(names);
+}
+
+/** Check if a name exists in a Tally data string (exact or smart fuzzy match) */
+function findExactName(dataStr, name, minConfidence = 0.55) {
     if (!dataStr || !name) return null;
     const searchName = name.trim();
-    // Match both <NAME>value</NAME> and NAME="value" attribute patterns
-    // Using a more robust regex to ensure we match the full string
+    
+    // 1. Direct Regex match
     const escapedName = escapeXML(searchName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const tagRegex = new RegExp(`<NAME>\\s*(${escapedName})\\s*</NAME>`, 'i');
     const attrRegex = new RegExp(`NAME="(${escapedName})"`, 'i');
-    
     const m = dataStr.match(tagRegex) || dataStr.match(attrRegex);
     if (m) {
         console.log(`[MATCH] Found exact Tally name for "${searchName}" -> "${m[1]}"`);
         return m[1];
     }
 
-    // Smart Fallback: Try singular/plural variation
-    let variation = '';
-    if (searchName.toLowerCase().endsWith('s')) {
-        variation = searchName.substring(0, searchName.length - 1);
-    } else {
-        variation = searchName + 's';
+    // 2. Singular/Plural variation
+    let variation = searchName.toLowerCase().endsWith('s') ? searchName.slice(0, -1) : searchName + 's';
+    const varEscaped = escapeXML(variation).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const varMatch = dataStr.match(new RegExp(`<NAME>\\s*(${varEscaped})\\s*</NAME>`, 'i'));
+    if (varMatch) {
+        console.log(`[SMART MATCH] Using Tally's "${varMatch[1]}" for "${searchName}" (singular/plural)`);
+        return varMatch[1];
     }
 
-    const varEscaped = escapeXML(variation).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const varTagRegex = new RegExp(`<NAME>\\s*(${varEscaped})\\s*</NAME>`, 'i');
-    const varMatch = dataStr.match(varTagRegex);
+    // 3. Smart Fuzzy Token & Levenshtein Matching across all Tally ledgers/items
+    const allNames = extractAllNamesFromXML(dataStr);
+    let best = null;
+    let maxScore = 0;
+    for (const candidate of allNames) {
+        const score = getPartySimilarity(searchName, candidate);
+        if (score > maxScore) {
+            maxScore = score;
+            best = candidate;
+        }
+    }
 
-    if (varMatch) {
-        console.log(`[SMART MATCH] Using Tally's "${varMatch[1]}" for bill's "${searchName}"`);
-        return varMatch[1];
+    if (best && maxScore >= minConfidence) {
+        console.log(`[FUZZY MATCH] 🎯 Matched "${searchName}" → Tally Ledger "${best}" (Confidence: ${(maxScore * 100).toFixed(1)}%)`);
+        return best;
     }
 
     return null;
@@ -969,7 +1078,9 @@ async function syncEntry(entry) {
             let bankResponse = await tallyRequest(bankXml);
             console.log(`[DEBUG RESPONSE]\n${bankResponse}`);
 
-            if (bankResponse.includes('Voucher date is missing')) {
+            const isDateError = (r) => /Voucher date is missing|Educational Mode|outside the specified|not valid in Educational|cannot be recorded|Bad date|Date is not within|date out of bounds/i.test(r);
+
+            if (!forcedDate && isDateError(bankResponse)) {
                 console.warn(`[VOUCHER] ⚠️  Tally date error detected. Likely Educational Mode restriction. Retrying with 1st of the month...`);
                 const retryXml = generateBankAccountingVoucherXML(entry, partyResolved, bankResolved, true);
                 bankResponse = await tallyRequest(retryXml);
@@ -1207,7 +1318,9 @@ async function syncEntry(entry) {
             let invResponse = await tallyRequest(invXml);
             console.log(`[DEBUG RESPONSE]\n${invResponse}`);
 
-            if (invResponse.includes('Voucher date is missing')) {
+            const isDateError = (r) => /Voucher date is missing|Educational Mode|outside the specified|not valid in Educational|cannot be recorded|Bad date|Date is not within|date out of bounds/i.test(r);
+
+            if (!forcedDate && isDateError(invResponse)) {
                 console.warn(`[VOUCHER] ⚠️  Tally date error detected. Likely Educational Mode restriction. Retrying with 1st of the month...`);
                 const retryXml = generateInventoryVoucherXML(entry, partyResolved, incomeResolved, taxLedgers, true);
                 invResponse = await tallyRequest(retryXml);
@@ -1235,7 +1348,9 @@ async function syncEntry(entry) {
             let accResponse = await tallyRequest(accXml);
             console.log(`[DEBUG RESPONSE]\n${accResponse}`);
 
-            if (!forcedDate && accResponse.includes('Voucher date is missing')) {
+            const isDateError = (r) => /Voucher date is missing|Educational Mode|outside the specified|not valid in Educational|cannot be recorded|Bad date|Date is not within|date out of bounds/i.test(r);
+
+            if (!forcedDate && isDateError(accResponse)) {
                 console.warn(`[VOUCHER] ⚠️  Tally date error detected on accounting entry. Retrying with 1st of the month...`);
                 const retryXml = generateAccountingVoucherXML(entry, partyResolved, incomeResolved, taxLedgers, true);
                 accResponse = await tallyRequest(retryXml);

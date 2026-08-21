@@ -7,6 +7,7 @@ import { authenticateToken, isAdmin } from '../middleware/auth.js';
 import { checkDailyBillLimit, checkProFeatureAccess } from '../middleware/subscriptionMiddleware.js';
 import multer from 'multer';
 import { extractInvoiceDetails, extractBankStatementDetails } from '../services/geminiService.js';
+import { groupPartyNamesInTransactions, findBestPartyLedger } from '../services/fuzzyMatchService.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -186,6 +187,27 @@ async function parseAndExtractInvoice(
     });
   }
 
+  // Fetch existing party ledgers for fuzzy matching
+  let resolvedPartyName = (data.partyName || 'Unknown Party').trim();
+  const rawExtractedParty = resolvedPartyName;
+  if (companyName && resolvedPartyName) {
+    try {
+      const [entriesLedgers, customLedgers] = await Promise.all([
+        Entry.find({ companyName }, 'partyName').lean(),
+        Ledger.find({ companyName }, 'name').lean()
+      ]);
+      const set = new Set<string>();
+      (entriesLedgers || []).forEach((e: any) => e.partyName && set.add(e.partyName.trim()));
+      (customLedgers || []).forEach((l: any) => l.name && set.add(l.name.trim()));
+      const match = findBestPartyLedger(resolvedPartyName, Array.from(set), 0.55);
+      if (match) {
+        resolvedPartyName = match.match;
+      }
+    } catch (err) {
+      console.warn('Party ledger lookup error:', err);
+    }
+  }
+
   // Intrastate vs Interstate GST check
   let finalGstType: 'cgst-sgst' | 'igst' = data.gstType || 'cgst-sgst';
   if (data.partyGstin && data.partyGstin.length >= 2) {
@@ -198,7 +220,8 @@ async function parseAndExtractInvoice(
   return {
     extractedEntry: {
       type: docType, 
-      partyName: data.partyName || 'Unknown Party',
+      partyName: resolvedPartyName,
+      rawPartyName: rawExtractedParty,
       partyGstin: data.partyGstin || '',
       invoiceNumber: data.invoiceNumber || `DOC-${Math.floor(Math.random() * 9000) + 1000}`,
       date: data.date || new Date().toISOString().split('T')[0],
@@ -683,9 +706,26 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
       };
     });
 
+    // Fetch existing company ledgers from DB to perform fuzzy party grouping & matching
+    let existingLedgerNames: string[] = [];
+    try {
+      const [entriesLedgers, customLedgers] = await Promise.all([
+        Entry.find({ companyName: req.user.companyName }, 'partyName').lean(),
+        Ledger.find({ companyName: req.user.companyName }, 'name').lean()
+      ]);
+      const set = new Set<string>();
+      (entriesLedgers || []).forEach((e: any) => e.partyName && set.add(e.partyName.trim()));
+      (customLedgers || []).forEach((l: any) => l.name && set.add(l.name.trim()));
+      existingLedgerNames = Array.from(set);
+    } catch (err) {
+      console.warn('Could not fetch existing ledgers for grouping:', err);
+    }
+
+    const groupedTransactions = groupPartyNamesInTransactions(formattedTransactions, existingLedgerNames);
+
     res.json({ 
       success: true, 
-      count: formattedTransactions.length, 
+      count: groupedTransactions.length, 
       bankName: detectedBank,
       accountType: detectedAccountType,
       accountNumber: data.accountNumber || '',
@@ -693,7 +733,7 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
       openingBalance: data.openingBalance || 0,
       closingBalance: data.closingBalance || 0,
       statementPeriod: data.statementPeriod || null,
-      data: formattedTransactions 
+      data: groupedTransactions 
     });
   } catch (error: any) {
     console.error('Bank statement parsing error DETAIL:', error);
