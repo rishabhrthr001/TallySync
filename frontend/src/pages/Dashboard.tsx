@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { 
   TrendingUp, TrendingDown, DollarSign, Package, CreditCard, Plus, ArrowUpRight, ArrowDownRight, Sparkles, RefreshCcw,
-  Printer, CheckCircle2, Clock, XCircle, Trash2, Check, RotateCcw, Eye, EyeOff
+  Printer, CheckCircle2, Clock, XCircle, Trash2, Check, RotateCcw, Eye, EyeOff, Users, ChevronDown, ChevronRight, Layers, ListFilter, ArrowRight
 } from 'lucide-react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
@@ -75,6 +75,9 @@ const Dashboard: React.FC = () => {
   const [suspenseGuid, setSuspenseGuid] = useState<string>('');
   const [selectedTxnIndices, setSelectedTxnIndices] = useState<number[]>([]);
   const [bulkTargetLedger, setBulkTargetLedger] = useState<string>('');
+  const [reconViewMode, setReconViewMode] = useState<'grouped' | 'list'>('grouped');
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState<string[]>([]);
+  const [groupFilterText, setGroupFilterText] = useState<string>('');
 
   const isCloseDate = (d1: string, d2: string, daysAllowed = 10) => {
     if (!d1 || !d2) return false;
@@ -281,6 +284,123 @@ const Dashboard: React.FC = () => {
     setSelectedTxnIndices([]);
     setBulkTargetLedger('');
     showToast(`Mapped ${selectedTxnIndices.length} transactions to ${bulkTargetLedger}!`, 'success');
+  };
+
+  const normalizePartyKey = (str: string): string => {
+    if (!str) return '';
+    return str
+      .toLowerCase()
+      .replace(/[\(\)\[\]\{\}\-_,.\/\\:;]/g, ' ')
+      .replace(/\b(ltd|limited|pvt|private|llp|inc|corp|co|enterprises|traders|company|agency|and|&|a\/c|ac|p|to|by)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  interface PartyClusterGroup {
+    groupKey: string;
+    representativeName: string;
+    mappedLedger: string;
+    transactions: any[];
+    indices: number[];
+    totalDeposit: number;
+    totalWithdrawal: number;
+    distinctVariations: string[];
+    action: 'create' | 'alter' | 'skip';
+  }
+
+  const partyGroups = React.useMemo(() => {
+    const groups: { [key: string]: PartyClusterGroup } = {};
+
+    tempTransactions.forEach((txn, idx) => {
+      const raw = (txn.bankPartyName || txn.partyName || 'Unknown Party').trim();
+      const isUpi = txn.isUpi || raw.toLowerCase() === 'upi' || (txn.notes && txn.notes.toLowerCase().includes('upi'));
+      
+      let clusterKey = isUpi ? 'UPI_CONSOLIDATED' : normalizePartyKey(raw);
+      if (!clusterKey) clusterKey = 'UNMAPPED_SUSPENSE';
+
+      // Merge short cluster prefixes (e.g. "chambal" with "chambal fertilisers")
+      const existingKeys = Object.keys(groups);
+      const matchedKey = existingKeys.find(k => {
+        if (k === 'UPI_CONSOLIDATED' || clusterKey === 'UPI_CONSOLIDATED') return false;
+        if (k === clusterKey) return true;
+        const kWords = k.split(' ').filter(w => w.length > 2);
+        const cWords = clusterKey.split(' ').filter(w => w.length > 2);
+        if (kWords.length > 0 && cWords.length > 0 && kWords[0] === cWords[0] && kWords[0].length >= 4) return true;
+        return false;
+      });
+
+      const finalKey = matchedKey || clusterKey;
+
+      if (!groups[finalKey]) {
+        groups[finalKey] = {
+          groupKey: finalKey,
+          representativeName: isUpi ? 'UPI Consolidated' : raw,
+          mappedLedger: txn.partyName || (isUpi ? 'UPI' : 'Suspense'),
+          transactions: [],
+          indices: [],
+          totalDeposit: 0,
+          totalWithdrawal: 0,
+          distinctVariations: [],
+          action: txn.action || 'create'
+        };
+      }
+
+      groups[finalKey].transactions.push(txn);
+      groups[finalKey].indices.push(idx);
+
+      const amt = Math.abs(cleanNum(txn.totalAmount));
+      const typeLower = (txn.type || 'payment').toLowerCase();
+      const isDeposit = typeLower === 'receipt' || (typeLower === 'contra' && !txn.isWithdrawal);
+      if (isDeposit) {
+        groups[finalKey].totalDeposit += amt;
+      } else {
+        groups[finalKey].totalWithdrawal += amt;
+      }
+
+      if (raw && !groups[finalKey].distinctVariations.includes(raw)) {
+        groups[finalKey].distinctVariations.push(raw);
+      }
+
+      // If a group has an already resolved non-Suspense party, use it as mappedLedger
+      if (txn.partyName && txn.partyName !== 'Suspense' && (!groups[finalKey].mappedLedger || groups[finalKey].mappedLedger === 'Suspense')) {
+        groups[finalKey].mappedLedger = txn.partyName;
+      }
+    });
+
+    return Object.values(groups).sort((a, b) => b.transactions.length - a.transactions.length);
+  }, [tempTransactions]);
+
+  const handleMapEntireGroup = (indices: number[], targetLedgerName: string) => {
+    const matchedLedger = tallyLedgers.find(l => l.partyName === targetLedgerName);
+    const newGuid = matchedLedger ? (matchedLedger._id || '') : (targetLedgerName === 'Suspense' ? suspenseGuid : '');
+    const isSuspense = targetLedgerName === 'Suspense';
+
+    setTempTransactions(prev => prev.map((t, idx) => {
+      if (!indices.includes(idx)) return t;
+      return {
+        ...t,
+        partyName: targetLedgerName,
+        partyGuid: newGuid,
+        reconStatus: isSuspense ? 'SUSPENSE' : 'MATCHED',
+        diffDetail: isSuspense ? 'Unmapped party → Posting via Suspense A/c' : `Mapped group to ${targetLedgerName}`
+      };
+    }));
+
+    showToast(`Mapped ${indices.length} transaction(s) in this group to "${targetLedgerName}"!`, 'success');
+  };
+
+  const handleSetGroupAction = (indices: number[], action: 'create' | 'alter' | 'skip') => {
+    setTempTransactions(prev => prev.map((t, idx) => {
+      if (!indices.includes(idx)) return t;
+      return { ...t, action };
+    }));
+    showToast(`Updated ${indices.length} transaction(s) action to ${action.toUpperCase()}!`, 'success');
+  };
+
+  const toggleGroupExpand = (groupKey: string) => {
+    setExpandedGroupKeys(prev => 
+      prev.includes(groupKey) ? prev.filter(k => k !== groupKey) : [...prev, groupKey]
+    );
   };
   
   // Selection mode states for clearing entries
@@ -1461,306 +1581,495 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Bulk mapping and bulk action bar */}
-                  {selectedTxnIndices.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-between gap-3 bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200 shadow-sm animate-fade-in">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-black text-indigo-900">
-                          Selected {selectedTxnIndices.length} transaction(s):
-                        </span>
-                        <select
-                          value={bulkTargetLedger}
-                          onChange={(e) => setBulkTargetLedger(e.target.value)}
-                          className="px-3 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer shadow-xs"
-                        >
-                          <option value="">-- Map Target Ledger --</option>
-                          <option value="Suspense">⚠️ Suspense (Unmapped)</option>
-                          {tallyLedgers.map(l => (
-                            <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={handleBulkMapLedger}
-                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
-                          disabled={!bulkTargetLedger}
-                        >
-                          Apply Map
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-600">Set Action:</span>
-                        <button
-                          type="button"
-                          onClick={() => handleBulkSetAction('create')}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
-                        >
-                          CREATE
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleBulkSetAction('alter')}
-                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
-                        >
-                          ALTER
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleBulkSetAction('skip')}
-                          className="px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
-                        >
-                          SKIP
-                        </button>
-                      </div>
+                  {/* View Mode Switcher: Grouped Party Mapping vs Detailed List */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setReconViewMode('grouped')}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                          reconViewMode === 'grouped'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        <Users className="h-3.5 w-3.5" />
+                        Grouped Party Mapping ({partyGroups.length} Groups)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReconViewMode('list')}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                          reconViewMode === 'list'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        <ListFilter className="h-3.5 w-3.5" />
+                        All Transactions ({tempTransactions.length} Entries)
+                      </button>
                     </div>
-                  )}
 
-                  {/* High Density Statement Transactions Table */}
-                  <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs bg-white">
-                    <div className="max-h-[420px] overflow-y-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider sticky top-0 z-10 border-b border-slate-200">
-                          <tr>
-                            <th className="p-3 w-10 text-center">
-                              <input 
-                                type="checkbox"
-                                checked={tempTransactions.length > 0 && selectedTxnIndices.length === tempTransactions.length}
-                                onChange={handleHeaderCheckboxChange}
-                                className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
-                              />
-                            </th>
-                            <th className="p-3 w-24">Date</th>
-                            <th className="p-3 w-48">Reconciliation Status</th>
-                            <th className="p-3">Particulars & Mapping</th>
-                            <th className="p-3 text-right w-28">Amount</th>
-                            <th className="p-3 text-center w-36">Tally Action</th>
-                            <th className="p-3 text-center w-16">Row</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                          {tempTransactions.map((txn: any, idx: number) => {
-                            const amt = cleanNum(txn.totalAmount);
-                            const typeLower = (txn.type || '').toLowerCase();
-                            let isDeposit = typeLower === 'receipt';
-                            let isWithdrawal = typeLower === 'payment';
-                            if (typeLower === 'contra') {
-                              if ((txn.notes || '').toLowerCase().includes('deposit') || (txn.partyName || '').toLowerCase().includes('deposit')) {
-                                isDeposit = true;
-                              } else {
-                                isWithdrawal = true;
-                              }
-                            }
+                    {reconViewMode === 'grouped' && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={groupFilterText}
+                          onChange={(e) => setGroupFilterText(e.target.value)}
+                          placeholder="Search party groups..."
+                          className="px-3 py-1 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 w-52 shadow-xs"
+                        />
+                      </div>
+                    )}
+                  </div>
 
-                            const isEditing = editingTxnIdx === idx;
-                            const status = txn.reconStatus || 'SUSPENSE';
-                            const action = txn.action || 'create';
-
-                            // Status badge colors
-                            let statusBadgeClass = 'bg-purple-50 text-purple-700 border-purple-200';
-                            let statusLabel = '🟣 SUSPENSE';
-                            if (status === 'MATCHED') {
-                              statusBadgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                              statusLabel = '🟢 MATCHED';
-                            } else if (status === 'AMOUNT MISMATCH') {
-                              statusBadgeClass = 'bg-amber-50 text-amber-800 border-amber-300';
-                              statusLabel = '🟡 AMOUNT MISMATCH';
-                            } else if (status === 'LEDGER MISMATCH') {
-                              statusBadgeClass = 'bg-orange-50 text-orange-800 border-orange-300';
-                              statusLabel = '🟠 LEDGER MISMATCH';
-                            } else if (status === 'MISSING VOUCHER') {
-                              statusBadgeClass = 'bg-blue-50 text-blue-700 border-blue-200';
-                              statusLabel = '🔵 MISSING VOUCHER';
-                            }
-
-                            return (
-                              <tr key={idx} className={isEditing ? "bg-indigo-50/50" : (selectedTxnIndices.includes(idx) ? "bg-indigo-50/15" : "hover:bg-slate-50/80 transition-colors")}>
-                                {/* Checkbox */}
-                                <td className="p-3 text-center align-top pt-3.5">
-                                  <input 
-                                    type="checkbox"
-                                    checked={selectedTxnIndices.includes(idx)}
-                                    onChange={() => handleRowCheckboxToggle(idx)}
-                                    className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
-                                  />
-                                </td>
-                                
-                                {/* Date */}
-                                <td className="p-3 align-top whitespace-nowrap font-mono text-slate-600 pt-3.5">
-                                  {isEditing ? (
-                                    <input 
-                                      type="date"
-                                      value={txn.date}
-                                      onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
-                                      className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
-                                    />
-                                  ) : (
-                                    txn.date
-                                  )}
-                                </td>
-
-                                {/* Reconciliation Status Column */}
-                                <td className="p-3 align-top pt-3.5">
-                                  <div className="space-y-1">
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black tracking-wide border ${statusBadgeClass}`}>
-                                      {statusLabel}
+                  {/* GROUPED PARTY MAPPING VIEW */}
+                  {reconViewMode === 'grouped' ? (
+                    <div className="space-y-3 max-h-[440px] overflow-y-auto pr-1">
+                      {partyGroups
+                        .filter(g => !groupFilterText || g.representativeName.toLowerCase().includes(groupFilterText.toLowerCase()) || g.distinctVariations.some(v => v.toLowerCase().includes(groupFilterText.toLowerCase())))
+                        .map(group => {
+                          const isExpanded = expandedGroupKeys.includes(group.groupKey);
+                          const isSuspense = !group.mappedLedger || group.mappedLedger === 'Suspense';
+                          return (
+                            <div key={group.groupKey} className={`rounded-2xl border transition-all ${isSuspense ? 'bg-purple-50/20 border-purple-200' : 'bg-white border-slate-200 shadow-xs'}`}>
+                              {/* Group Summary & Mapping Header */}
+                              <div className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                <div className="flex-1 space-y-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-black text-sm text-slate-900">{group.representativeName}</span>
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-800">
+                                      {group.transactions.length} transaction{group.transactions.length > 1 ? 's' : ''}
                                     </span>
-                                    {txn.diffDetail && (
-                                      <div className="text-[10px] font-bold text-slate-600 leading-tight">
-                                        {txn.diffDetail}
-                                      </div>
+                                    {group.totalDeposit > 0 && (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800">
+                                        +₹{group.totalDeposit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} Cr
+                                      </span>
+                                    )}
+                                    {group.totalWithdrawal > 0 && (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800">
+                                        -₹{group.totalWithdrawal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} Dr
+                                      </span>
                                     )}
                                   </div>
-                                </td>
+                                  
+                                  {/* Distinct Variations in statement */}
+                                  <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500 pt-0.5">
+                                    <span className="font-bold text-slate-400">Variations in Statement:</span>
+                                    {group.distinctVariations.map((v, i) => (
+                                      <span key={i} className="px-1.5 py-0.5 bg-slate-100 border border-slate-200/60 rounded-md text-[10px] font-mono text-slate-700">
+                                        {v}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
 
-                                {/* Particulars & Ledger Mapping */}
-                                <td className="p-3 align-top">
-                                  {isEditing ? (
-                                    <div className="space-y-1">
-                                      <input 
-                                        type="text"
-                                        value={txn.partyName}
-                                        onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
-                                        placeholder="Party Ledger Name"
-                                        className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
-                                      />
-                                      <input 
-                                        type="text"
-                                        value={txn.notes}
-                                        onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
-                                        placeholder="Narration details..."
-                                        className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] text-slate-600"
-                                      />
-                                    </div>
-                                  ) : (
-                                    <div className="space-y-1.5 max-w-sm">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Map to:</span>
-                                        <select
-                                          value={txn.partyName || 'Suspense'}
-                                          onChange={(e) => updatePartyMapping(idx, e.target.value)}
-                                          className={`p-1 w-full bg-slate-50 border rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-bold transition-all cursor-pointer ${
-                                            txn.partyName === 'Suspense' 
-                                              ? 'border-purple-300 text-purple-700 font-black bg-purple-50/40' 
-                                              : 'border-slate-200 text-slate-900'
-                                          }`}
-                                        >
-                                          <option value="Suspense">⚠️ Suspense (Unmapped)</option>
-                                          {tallyLedgers.map(l => (
-                                            <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                      <div className="text-[10px] text-slate-500 font-normal leading-tight">
-                                        <span className="font-semibold text-slate-700">{txn.bankPartyName || txn.partyName}</span> {txn.notes && `— ${txn.notes}`}
-                                      </div>
-                                    </div>
-                                  )}
-                                </td>
+                                {/* Mapping Control for Entire Group */}
+                                <div className="flex items-center gap-2">
+                                  <div className="flex flex-col gap-1 min-w-[260px]">
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Map all {group.transactions.length} to Tally Ledger:</span>
+                                    <select
+                                      value={group.mappedLedger || 'Suspense'}
+                                      onChange={(e) => handleMapEntireGroup(group.indices, e.target.value)}
+                                      className={`p-2 w-full bg-slate-50 border rounded-xl text-xs font-black outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-xs transition-all ${
+                                        isSuspense 
+                                          ? 'border-purple-300 text-purple-700 bg-purple-50/50' 
+                                          : 'border-emerald-300 text-emerald-900 bg-emerald-50/40'
+                                      }`}
+                                    >
+                                      <option value="Suspense">⚠️ Suspense (Unmapped)</option>
+                                      <option value="UPI">⚡ UPI (Consolidated Ledger)</option>
+                                      {tallyLedgers.map(l => (
+                                        <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
+                                      ))}
+                                    </select>
+                                  </div>
 
-                                {/* Amount Column */}
-                                <td className="p-3 align-top text-right font-mono font-bold whitespace-nowrap pt-3.5">
-                                  {isEditing ? (
-                                    <div className="space-y-1">
-                                      <select
-                                        value={txn.type}
-                                        onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
-                                        className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] font-bold uppercase"
-                                      >
-                                        <option value="receipt">Receipt (Cr)</option>
-                                        <option value="payment">Payment (Dr)</option>
-                                        <option value="contra">Contra</option>
-                                      </select>
-                                      <input 
-                                        type="number"
-                                        value={txn.totalAmount}
-                                        onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
-                                        className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-right"
-                                      />
-                                    </div>
-                                  ) : isDeposit ? (
-                                    <div className="text-emerald-600">
-                                      +₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                      <span className="block text-[9px] font-bold uppercase text-emerald-400">Receipt</span>
-                                    </div>
-                                  ) : (
-                                    <div className="text-rose-600">
-                                      -₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                      <span className="block text-[9px] font-bold uppercase text-rose-400">Payment</span>
-                                    </div>
-                                  )}
-                                </td>
-
-                                {/* Tally Action Column */}
-                                <td className="p-3 align-top text-center whitespace-nowrap pt-3.5">
-                                  <div className="inline-flex rounded-lg shadow-xs border border-slate-200 overflow-hidden bg-slate-50 p-0.5">
+                                  {/* Quick Action Buttons for Group */}
+                                  <div className="flex items-center gap-1">
                                     <button
                                       type="button"
-                                      onClick={() => updateRowAction(idx, 'create')}
-                                      className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
-                                        action === 'create' 
-                                          ? 'bg-blue-600 text-white shadow-xs' 
-                                          : 'text-slate-500 hover:text-slate-900'
-                                      }`}
-                                      title="Create new Receipt/Payment voucher in Tally"
+                                      onClick={() => handleSetGroupAction(group.indices, 'create')}
+                                      className="px-2 py-1.5 text-[10px] font-black rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white transition-all cursor-pointer"
+                                      title="Set CREATE for all entries in group"
                                     >
                                       CREATE
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => updateRowAction(idx, 'alter')}
-                                      className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
-                                        action === 'alter' 
-                                          ? 'bg-amber-600 text-white shadow-xs' 
-                                          : 'text-slate-500 hover:text-slate-900'
-                                      }`}
-                                      title="Alter/Update existing voucher in Tally"
-                                    >
-                                      ALTER
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => updateRowAction(idx, 'skip')}
-                                      className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
-                                        action === 'skip' 
-                                          ? 'bg-slate-700 text-white shadow-xs' 
-                                          : 'text-slate-500 hover:text-slate-900'
-                                      }`}
-                                      title="Skip syncing to Tally (already exists)"
+                                      onClick={() => handleSetGroupAction(group.indices, 'skip')}
+                                      className="px-2 py-1.5 text-[10px] font-black rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-700 hover:text-white transition-all cursor-pointer"
+                                      title="Set SKIP for all entries in group"
                                     >
                                       SKIP
                                     </button>
                                   </div>
-                                </td>
 
-                                {/* Row Controls */}
-                                <td className="p-3 align-top text-center whitespace-nowrap pt-3.5">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingTxnIdx(isEditing ? null : idx)}
-                                      className={`p-1.5 rounded-lg transition-colors ${isEditing ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
-                                      title={isEditing ? "Save Row" : "Edit Row"}
-                                    >
-                                      <Check className="h-3.5 w-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeTempTxn(idx)}
-                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                                      title="Delete Row"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                  {/* Expand/Collapse details */}
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleGroupExpand(group.groupKey)}
+                                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                                    title={isExpanded ? "Collapse entries" : "View all entries in group"}
+                                  >
+                                    {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Expandable Transactions for this Group */}
+                              {isExpanded && (
+                                <div className="border-t border-slate-100 bg-slate-50/70 p-3 rounded-b-2xl">
+                                  <table className="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                      <tr className="text-[10px] font-bold text-slate-400 uppercase border-b border-slate-200 pb-1">
+                                        <th className="pb-1.5 w-24">Date</th>
+                                        <th className="pb-1.5">Narration / Counterparty Details</th>
+                                        <th className="pb-1.5 text-right w-28">Amount</th>
+                                        <th className="pb-1.5 text-center w-24">Tally Action</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200/50">
+                                      {group.transactions.map((txn, subIdx) => {
+                                        const globalIdx = group.indices[subIdx];
+                                        const typeLower = (txn.type || '').toLowerCase();
+                                        const isDep = typeLower === 'receipt' || (typeLower === 'contra' && !txn.isWithdrawal);
+                                        const amt = Math.abs(cleanNum(txn.totalAmount));
+                                        return (
+                                          <tr key={subIdx} className="hover:bg-white/80 transition-colors">
+                                            <td className="py-2 font-mono text-slate-600">{txn.date}</td>
+                                            <td className="py-2 text-slate-700">
+                                              <span className="font-semibold text-slate-900">{txn.bankPartyName || txn.partyName}</span>
+                                              {txn.notes && <span className="text-slate-500 ml-1.5 font-mono text-[11px]">— {txn.notes}</span>}
+                                            </td>
+                                            <td className={`py-2 text-right font-mono font-bold ${isDep ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                              {isDep ? '+' : '-'}₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                            </td>
+                                            <td className="py-2 text-center">
+                                              <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
+                                                txn.action === 'create' ? 'bg-blue-100 text-blue-800' : (txn.action === 'alter' ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700')
+                                              }`}>
+                                                {txn.action || 'create'}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                     </div>
-                  </div>
+                  ) : (
+                    /* DETAILED TRANSACTIONS LIST VIEW */
+                    <div className="space-y-3">
+                      {/* Bulk mapping and bulk action bar */}
+                      {selectedTxnIndices.length > 0 && (
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200 shadow-sm animate-fade-in">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black text-indigo-900">
+                              Selected {selectedTxnIndices.length} transaction(s):
+                            </span>
+                            <select
+                              value={bulkTargetLedger}
+                              onChange={(e) => setBulkTargetLedger(e.target.value)}
+                              className="px-3 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 cursor-pointer shadow-xs"
+                            >
+                              <option value="">-- Map Target Ledger --</option>
+                              <option value="Suspense">⚠️ Suspense (Unmapped)</option>
+                              <option value="UPI">⚡ UPI (Consolidated Ledger)</option>
+                              {tallyLedgers.map(l => (
+                                <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={handleBulkMapLedger}
+                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                              disabled={!bulkTargetLedger}
+                            >
+                              Apply Map
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-600">Set Action:</span>
+                            <button
+                              type="button"
+                              onClick={() => handleBulkSetAction('create')}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                            >
+                              CREATE
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleBulkSetAction('alter')}
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                            >
+                              ALTER
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleBulkSetAction('skip')}
+                              className="px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                            >
+                              SKIP
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* High Density Statement Transactions Table */}
+                      <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs bg-white">
+                        <div className="max-h-[420px] overflow-y-auto">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider sticky top-0 z-10 border-b border-slate-200">
+                              <tr>
+                                <th className="p-3 w-10 text-center">
+                                  <input 
+                                    type="checkbox"
+                                    checked={tempTransactions.length > 0 && selectedTxnIndices.length === tempTransactions.length}
+                                    onChange={handleHeaderCheckboxChange}
+                                    className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
+                                  />
+                                </th>
+                                <th className="p-3 w-24">Date</th>
+                                <th className="p-3 w-48">Reconciliation Status</th>
+                                <th className="p-3">Particulars & Mapping</th>
+                                <th className="p-3 text-right w-28">Amount</th>
+                                <th className="p-3 text-center w-36">Tally Action</th>
+                                <th className="p-3 text-center w-16">Row</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                              {tempTransactions.map((txn: any, idx: number) => {
+                                const amt = cleanNum(txn.totalAmount);
+                                const typeLower = (txn.type || '').toLowerCase();
+                                let isDeposit = typeLower === 'receipt';
+                                let isWithdrawal = typeLower === 'payment';
+                                if (typeLower === 'contra') {
+                                  if ((txn.notes || '').toLowerCase().includes('deposit') || (txn.partyName || '').toLowerCase().includes('deposit')) {
+                                    isDeposit = true;
+                                  } else {
+                                    isWithdrawal = true;
+                                  }
+                                }
+
+                                const isEditing = editingTxnIdx === idx;
+                                const status = txn.reconStatus || 'SUSPENSE';
+                                const action = txn.action || 'create';
+
+                                // Status badge colors
+                                let statusBadgeClass = 'bg-purple-50 text-purple-700 border-purple-200';
+                                let statusLabel = '🟣 SUSPENSE';
+                                if (status === 'MATCHED') {
+                                  statusBadgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                  statusLabel = '🟢 MATCHED';
+                                } else if (status === 'AMOUNT MISMATCH') {
+                                  statusBadgeClass = 'bg-amber-50 text-amber-800 border-amber-300';
+                                  statusLabel = '🟡 AMOUNT MISMATCH';
+                                } else if (status === 'LEDGER MISMATCH') {
+                                  statusBadgeClass = 'bg-orange-50 text-orange-800 border-orange-300';
+                                  statusLabel = '🟠 LEDGER MISMATCH';
+                                } else if (status === 'MISSING VOUCHER') {
+                                  statusBadgeClass = 'bg-blue-50 text-blue-700 border-blue-200';
+                                  statusLabel = '🔵 MISSING VOUCHER';
+                                }
+
+                                return (
+                                  <tr key={idx} className={isEditing ? "bg-indigo-50/50" : (selectedTxnIndices.includes(idx) ? "bg-indigo-50/15" : "hover:bg-slate-50/80 transition-colors")}>
+                                    {/* Checkbox */}
+                                    <td className="p-3 text-center align-top pt-3.5">
+                                      <input 
+                                        type="checkbox"
+                                        checked={selectedTxnIndices.includes(idx)}
+                                        onChange={() => handleRowCheckboxToggle(idx)}
+                                        className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500 cursor-pointer"
+                                      />
+                                    </td>
+                                    
+                                    {/* Date */}
+                                    <td className="p-3 align-top whitespace-nowrap font-mono text-slate-600 pt-3.5">
+                                      {isEditing ? (
+                                        <input 
+                                          type="date"
+                                          value={txn.date}
+                                          onChange={(e) => updateTempTxn(idx, 'date', e.target.value)}
+                                          className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
+                                        />
+                                      ) : (
+                                        txn.date
+                                      )}
+                                    </td>
+
+                                    {/* Reconciliation Status Column */}
+                                    <td className="p-3 align-top pt-3.5">
+                                      <div className="space-y-1">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black tracking-wide border ${statusBadgeClass}`}>
+                                          {statusLabel}
+                                        </span>
+                                        {txn.diffDetail && (
+                                          <div className="text-[10px] font-bold text-slate-600 leading-tight">
+                                            {txn.diffDetail}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+
+                                    {/* Particulars & Ledger Mapping */}
+                                    <td className="p-3 align-top">
+                                      {isEditing ? (
+                                        <div className="space-y-1">
+                                          <input 
+                                            type="text"
+                                            value={txn.partyName}
+                                            onChange={(e) => updateTempTxn(idx, 'partyName', e.target.value)}
+                                            placeholder="Party Ledger Name"
+                                            className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-slate-800"
+                                          />
+                                          <input 
+                                            type="text"
+                                            value={txn.notes}
+                                            onChange={(e) => updateTempTxn(idx, 'notes', e.target.value)}
+                                            placeholder="Narration details..."
+                                            className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] text-slate-600"
+                                          />
+                                        </div>
+                                      ) : (
+                                        <div className="space-y-1.5 max-w-sm">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Map to:</span>
+                                            <select
+                                              value={txn.partyName || 'Suspense'}
+                                              onChange={(e) => updatePartyMapping(idx, e.target.value)}
+                                              className={`p-1 w-full bg-slate-50 border rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-bold transition-all cursor-pointer ${
+                                                txn.partyName === 'Suspense' 
+                                                  ? 'border-purple-300 text-purple-700 font-black bg-purple-50/40' 
+                                                  : 'border-slate-200 text-slate-900'
+                                              }`}
+                                            >
+                                              <option value="Suspense">⚠️ Suspense (Unmapped)</option>
+                                              <option value="UPI">⚡ UPI (Consolidated Ledger)</option>
+                                              {tallyLedgers.map(l => (
+                                                <option key={l._id} value={l.partyName}>{l.partyName} ({l.parentGroup})</option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                          <div className="text-[10px] text-slate-500 font-normal leading-tight">
+                                            <span className="font-semibold text-slate-700">{txn.bankPartyName || txn.partyName}</span> {txn.notes && `— ${txn.notes}`}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </td>
+
+                                    {/* Amount Column */}
+                                    <td className="p-3 align-top text-right font-mono font-bold whitespace-nowrap pt-3.5">
+                                      {isEditing ? (
+                                        <div className="space-y-1">
+                                          <select
+                                            value={txn.type}
+                                            onChange={(e) => updateTempTxn(idx, 'type', e.target.value)}
+                                            className="w-full p-1 bg-white border border-slate-300 rounded text-[11px] font-bold uppercase"
+                                          >
+                                            <option value="receipt">Receipt (Cr)</option>
+                                            <option value="payment">Payment (Dr)</option>
+                                            <option value="contra">Contra</option>
+                                          </select>
+                                          <input 
+                                            type="number"
+                                            value={txn.totalAmount}
+                                            onChange={(e) => updateTempTxn(idx, 'totalAmount', parseFloat(e.target.value) || 0)}
+                                            className="w-full p-1 bg-white border border-slate-300 rounded text-xs font-bold text-right"
+                                          />
+                                        </div>
+                                      ) : isDeposit ? (
+                                        <div className="text-emerald-600">
+                                          +₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                          <span className="block text-[9px] font-bold uppercase text-emerald-400">Receipt</span>
+                                        </div>
+                                      ) : (
+                                        <div className="text-rose-600">
+                                          -₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                          <span className="block text-[9px] font-bold uppercase text-rose-400">Payment</span>
+                                        </div>
+                                      )}
+                                    </td>
+
+                                    {/* Tally Action Column */}
+                                    <td className="p-3 align-top text-center whitespace-nowrap pt-3.5">
+                                      <div className="inline-flex rounded-lg shadow-xs border border-slate-200 overflow-hidden bg-slate-50 p-0.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateRowAction(idx, 'create')}
+                                          className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
+                                            action === 'create' 
+                                              ? 'bg-blue-600 text-white shadow-xs' 
+                                              : 'text-slate-500 hover:text-slate-900'
+                                          }`}
+                                          title="Create new Receipt/Payment voucher in Tally"
+                                        >
+                                          CREATE
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateRowAction(idx, 'alter')}
+                                          className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
+                                            action === 'alter' 
+                                              ? 'bg-amber-600 text-white shadow-xs' 
+                                              : 'text-slate-500 hover:text-slate-900'
+                                          }`}
+                                          title="Alter/Update existing voucher in Tally"
+                                        >
+                                          ALTER
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateRowAction(idx, 'skip')}
+                                          className={`px-2 py-1 text-[10px] font-black rounded-md transition-all ${
+                                            action === 'skip' 
+                                              ? 'bg-slate-700 text-white shadow-xs' 
+                                              : 'text-slate-500 hover:text-slate-900'
+                                          }`}
+                                          title="Skip syncing to Tally (already exists)"
+                                        >
+                                          SKIP
+                                        </button>
+                                      </div>
+                                    </td>
+
+                                    {/* Row Controls */}
+                                    <td className="p-3 align-top text-center whitespace-nowrap pt-3.5">
+                                      <div className="flex items-center justify-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingTxnIdx(isEditing ? null : idx)}
+                                          className={`p-1.5 rounded-lg transition-colors ${isEditing ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                                          title={isEditing ? "Save Row" : "Edit Row"}
+                                        >
+                                          <Check className="h-3.5 w-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeTempTxn(idx)}
+                                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                          title="Delete Row"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Sync to Tally Footer Action Bar */}
                   <div className="flex items-center justify-between gap-3 pt-2">
