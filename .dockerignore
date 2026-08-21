@@ -1,0 +1,8 @@
+﻿node_modules
+*/node_modules
+*.log
+.git
+.env
+backend/bin/poppler/poppler.zip
+backend/bin/qpdf.zip
+tally-agent
