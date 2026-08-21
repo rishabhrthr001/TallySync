@@ -102,6 +102,20 @@ function getStateName(gstin) {
 // ─── NETWORK ────────────────────────────────────────────────────────────────
 
 async function login() {
+    // If BACKEND_URL is not explicitly forced via environment variable, auto-detect active backend
+    if (!process.env.BACKEND_URL) {
+        try {
+            await axios.get('http://localhost:3000/api/auth/me', { timeout: 1200 });
+            CONFIG.BACKEND_URL = 'http://localhost:3000';
+        } catch (e) {
+            if (e.response && (e.response.status === 401 || e.response.status === 200)) {
+                CONFIG.BACKEND_URL = 'http://localhost:3000';
+            } else {
+                CONFIG.BACKEND_URL = 'https://photobill-backend-1020363630918.asia-south1.run.app';
+            }
+        }
+    }
+
     while (true) {
         try {
             console.log(`[AUTH] Attempting login to ${CONFIG.BACKEND_URL}...`);
@@ -110,10 +124,17 @@ async function login() {
                 password: CONFIG.PASSWORD
             });
             AUTH_TOKEN = res.data.token;
-            console.log('[AUTH] Login successful.');
+            console.log(`[AUTH] ✅ Login successful to ${CONFIG.BACKEND_URL}.`);
             break;
         } catch (error) {
-            console.error(`[AUTH] Login failed: ${error.message}. Retrying in 5 seconds...`);
+            console.error(`[AUTH] Login failed on ${CONFIG.BACKEND_URL}: ${error.response?.data?.error || error.message}. Retrying in 5 seconds...`);
+            if (!process.env.BACKEND_URL) {
+                if (CONFIG.BACKEND_URL.includes('localhost')) {
+                    CONFIG.BACKEND_URL = 'https://photobill-backend-1020363630918.asia-south1.run.app';
+                } else {
+                    CONFIG.BACKEND_URL = 'http://localhost:3000';
+                }
+            }
             await new Promise(r => setTimeout(r, 5000));
         }
     }
