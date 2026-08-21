@@ -286,6 +286,15 @@ router.get('/sync-queue', authenticateToken, async (req: any, res) => {
   }
 });
 
+// Endpoint for Tally Agent pending background tasks
+router.get('/pending-sync-tasks', authenticateToken, async (req: any, res) => {
+  try {
+    res.json([]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // POST new entry with line items, stock updates, and ledger tracking
 router.post('/', authenticateToken, checkDailyBillLimit, async (req: any, res) => {
   const { type, partyName, invoiceNumber, date, items, taxableAmount, taxAmount, totalAmount, notes, transporterDetails, idempotencyKey, gstType } = req.body;
@@ -637,8 +646,18 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
 
     const formattedTransactions = rawTransactions.map((txn: any) => {
       const lowercaseType = (txn.voucherType || 'Payment').toLowerCase();
-      let party = txn.partyName || '';
-      if (!party) {
+      let originalParty = (txn.partyName || '').trim();
+      const narr = (txn.narration || '').toLowerCase();
+      const isUpi = /\bupi\b/i.test(narr) || 
+                    narr.includes('upi/') || 
+                    narr.includes('upi-') || 
+                    narr.includes('/upi/') || 
+                    (txn.referenceNumber && /^\d{12}$/.test(txn.referenceNumber));
+      
+      let party = originalParty;
+      if (isUpi) {
+        party = 'UPI';
+      } else if (!party) {
         if (lowercaseType === 'payment') {
           party = 'Bank Expenses';
         } else if (lowercaseType === 'receipt') {
@@ -647,17 +666,20 @@ router.post('/upload-bank-statement', authenticateToken, checkProFeatureAccess, 
           party = 'Bank Adjustments';
         }
       }
+
       return {
         date: txn.date,
         type: lowercaseType,
         partyName: party,
+        bankPartyName: originalParty || party,
         invoiceNumber: txn.referenceNumber || `TXN-${Math.floor(Math.random() * 9000000000) + 1000000000}`,
         totalAmount: txn.amount,
         notes: txn.narration || '',
         confidence: txn.confidence || 1.0,
-        reason: txn.reason || '',
+        reason: isUpi ? `UPI payment from/to ${originalParty || 'Counterparty'}` : (txn.reason || ''),
         bankLedger: (txn.bankLedger || detectedBank).trim(),
-        accountType: detectedAccountType
+        accountType: detectedAccountType,
+        isUpi
       };
     });
 

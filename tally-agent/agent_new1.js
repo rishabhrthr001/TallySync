@@ -31,6 +31,25 @@ function isCompanyMatch(entryCompany, activeCompany) {
     return false;
 }
 
+function isUpiTransaction(entry) {
+    if (!entry) return false;
+    if (entry.isUpi) return true;
+    const p = (entry.partyName || '').toLowerCase();
+    if (p === 'upi') return true;
+    const bp = (entry.bankPartyName || '').toLowerCase();
+    const bn = (entry.bankNarration || '').toLowerCase();
+    const n = (entry.notes || '').toLowerCase();
+    const inv = (entry.invoiceNumber || '').toLowerCase();
+    const combined = `${p} ${bp} ${bn} ${n} ${inv}`;
+    
+    return /\bupi\b/i.test(combined) || 
+           combined.includes('upi/') || 
+           combined.includes('/upi/') || 
+           combined.includes('upi-') || 
+           combined.includes('-upi-') ||
+           combined.includes('upi:');
+}
+
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
 function escapeXML(str) {
@@ -842,61 +861,66 @@ async function syncEntry(entry) {
             const bankName = (entry.bankLedger || 'Bank Account').trim();
             const partyName = (entry.partyName || 'Bank Adjustments').trim();
             const accountType = (entry.accountType || '').toLowerCase();
-            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Account Type: "${entry.accountType || 'Current Account'}", Party: "${partyName}"`);
+            const originalPartyName = entry.bankPartyName || (partyName !== 'UPI' && partyName !== 'Suspense' ? partyName : '');
+            const isUpi = isUpiTransaction(entry);
 
-            const ledgersNeeded = [];
+            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Account Type: "${entry.accountType || 'Current Account'}", Party: "${partyName}", isUPI: ${isUpi}`);
 
-            // Determine groups
-            let bankGroup = 'Bank Accounts';
-            if (accountType.includes('od') || accountType.includes('overdraft')) {
-                bankGroup = 'Bank OD A/c';
-            } else if (accountType.includes('occ') || accountType.includes('cash credit') || accountType.includes('cc')) {
-                bankGroup = 'Bank OCC A/c';
-            } else if (bankName.toLowerCase().includes('cash')) {
-                bankGroup = 'Cash-in-hand';
+            // Resolve bank ledger
+            const bankExact = findExactName(masterData, bankName);
+            let bankResolved = bankName;
+            if (bankExact) {
+                bankResolved = bankExact;
+            } else {
+                let bankGroup = 'Bank Accounts';
+                if (accountType.includes('od') || accountType.includes('overdraft')) {
+                    bankGroup = 'Bank OD A/c';
+                } else if (accountType.includes('occ') || accountType.includes('cash credit') || accountType.includes('cc')) {
+                    bankGroup = 'Bank OCC A/c';
+                } else if (bankName.toLowerCase().includes('cash')) {
+                    bankGroup = 'Cash-in-hand';
+                }
+                await upsertLedger(entry.companyName, bankName, bankGroup, '', false);
+                bankResolved = bankName;
             }
 
-            let partyGroup = 'Sundry Creditors'; // default for payment
-            if (entry.type === 'receipt') {
-                partyGroup = 'Sundry Debtors';
-            } else if (entry.type === 'contra') {
-                partyGroup = 'Bank Accounts'; // Contra is bank-to-bank or cash-to-bank
-                if (partyName.toLowerCase().includes('cash')) {
-                    partyGroup = 'Cash-in-hand';
-                }
-            } else if (entry.type === 'journal') {
-                partyGroup = 'Indirect Expenses'; // default for journal charges
-            }
-
-            ledgersNeeded.push({ name: bankName, group: bankGroup, isBank: true });
-            ledgersNeeded.push({ name: partyName, group: partyGroup, isBank: false });
-
-            const resolvedNames = {};
-            for (const led of ledgersNeeded) {
-                const nameLower = led.name.toLowerCase();
-                if (['cash', 'bank', 'profit & loss'].includes(nameLower)) {
-                    resolvedNames[led.name] = led.name;
-                    continue;
-                }
-
-                const exactName = findExactName(masterData, led.name);
-                if (exactName) {
-                    resolvedNames[led.name] = exactName;
-                    if (led.isBank) {
-                        console.log(`[BANK SYNC] ✅ Bank ledger "${led.name}" matches Tally ledger "${exactName}". Pushing all details into it.`);
-                    }
+            // Resolve party ledger
+            let partyResolved = '';
+            if (isUpi) {
+                console.log(`[BANK SYNC] ⚡ UPI Transaction detected (Party: "${originalPartyName || 'Counterparty'}"). Routing to consolidated "UPI" ledger.`);
+                const upiExact = findExactName(masterData, 'UPI');
+                if (upiExact) {
+                    partyResolved = upiExact;
                 } else {
-                    console.log(`[LEDGER] "${led.name}" not found in Tally, creating under "${led.group}"`);
-                    await upsertLedger(entry.companyName, led.name, led.group, '', false);
-                    resolvedNames[led.name] = led.name;
-                    if (led.isBank) {
-                        console.log(`[BANK SYNC] ✅ Created new bank ledger "${led.name}" in Tally under "${led.group}". Pushing all details into it.`);
-                    }
+                    await upsertLedger(entry.companyName, 'UPI', 'Current Assets', '', false);
+                    partyResolved = 'UPI';
+                }
+            } else {
+                const exactName = findExactName(masterData, partyName);
+                if (exactName) {
+                    partyResolved = exactName;
+                } else {
+                    let partyGroup = 'Sundry Creditors';
+                    if (entry.type === 'receipt') partyGroup = 'Sundry Debtors';
+                    else if (entry.type === 'contra') partyGroup = partyName.toLowerCase().includes('cash') ? 'Cash-in-hand' : 'Bank Accounts';
+                    else if (entry.type === 'journal') partyGroup = 'Indirect Expenses';
+                    await upsertLedger(entry.companyName, partyName, partyGroup, '', false);
+                    partyResolved = partyName;
                 }
             }
 
-            const bankResolved = resolvedNames[bankName];
-            const partyResolved = resolvedNames[partyName];
+            // Enrich narration
+            const originalNotes = entry.bankNarration || entry.notes || '';
+            const refStr = entry.invoiceNumber ? ` | Ref: ${entry.invoiceNumber}` : '';
+            const partyDisplayName = (originalPartyName && originalPartyName.toLowerCase() !== 'upi' && originalPartyName.toLowerCase() !== 'suspense')
+                ? originalPartyName
+                : (partyName !== 'UPI' && partyName !== 'Suspense' ? partyName : '');
+
+            if (isUpi) {
+                entry.notes = `[UPI] Party: ${partyDisplayName || 'Counterparty'}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
+            } else {
+                entry.notes = `[Bank Statement Entry] Party: ${partyResolved}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
+            }
 
             // 3. Create Voucher
             const isOk = (r) => r.includes('<CREATED>1</CREATED>') || r.includes('<ALTERED>1</ALTERED>');

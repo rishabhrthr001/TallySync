@@ -31,6 +31,25 @@ function isCompanyMatch(entryCompany, activeCompany) {
     return false;
 }
 
+function isUpiTransaction(entry) {
+    if (!entry) return false;
+    if (entry.isUpi) return true;
+    const p = (entry.partyName || '').toLowerCase();
+    if (p === 'upi') return true;
+    const bp = (entry.bankPartyName || '').toLowerCase();
+    const bn = (entry.bankNarration || '').toLowerCase();
+    const n = (entry.notes || '').toLowerCase();
+    const inv = (entry.invoiceNumber || '').toLowerCase();
+    const combined = `${p} ${bp} ${bn} ${n} ${inv}`;
+    
+    return /\bupi\b/i.test(combined) || 
+           combined.includes('upi/') || 
+           combined.includes('/upi/') || 
+           combined.includes('upi-') || 
+           combined.includes('-upi-') ||
+           combined.includes('upi:');
+}
+
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
 function escapeXML(str) {
@@ -820,7 +839,10 @@ async function syncEntry(entry) {
             const bankName = (entry.bankLedger || 'Bank Account').trim();
             const partyName = (entry.partyName || 'Suspense').trim();
             const accountType = (entry.accountType || '').toLowerCase();
-            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Account Type: "${entry.accountType || 'Current Account'}", Party: "${partyName}"`);
+            const originalPartyName = entry.bankPartyName || (partyName !== 'UPI' && partyName !== 'Suspense' ? partyName : '');
+            const isUpi = isUpiTransaction(entry);
+
+            console.log(`[BANK SYNC] Target Bank Ledger: "${bankName}", Account Type: "${entry.accountType || 'Current Account'}", Party: "${partyName}", isUPI: ${isUpi}`);
 
             // Resolve bank ledger name: check if exists in Tally
             const bankExact = findExactName(masterData, bankName);
@@ -846,9 +868,20 @@ async function syncEntry(entry) {
             // Resolve party ledger name
             let partyResolved = '';
             let isSuspenseRedirect = false;
-            const originalPartyName = entry.bankPartyName || partyName;
 
-            if (partyName.toLowerCase() === 'suspense') {
+            if (isUpi) {
+                console.log(`[BANK SYNC] ⚡ UPI Transaction detected (Party: "${originalPartyName || 'Counterparty'}"). Routing to consolidated "UPI" ledger.`);
+                const upiExact = findExactName(masterData, 'UPI');
+                if (upiExact) {
+                    partyResolved = upiExact;
+                    console.log(`[BANK SYNC] ✅ Found existing Tally "UPI" ledger: "${upiExact}".`);
+                } else {
+                    console.log(`[BANK SYNC] ⚠️ "UPI" ledger not found in Tally. Auto-creating "UPI" ledger under "Current Assets"...`);
+                    await upsertLedger(entry.companyName, 'UPI', 'Current Assets', '', false);
+                    partyResolved = 'UPI';
+                    console.log(`[BANK SYNC] ✅ Created "UPI" ledger in Tally.`);
+                }
+            } else if (partyName.toLowerCase() === 'suspense') {
                 const suspenseExact = findExactName(masterData, 'Suspense');
                 if (suspenseExact) {
                     partyResolved = suspenseExact;
@@ -880,8 +913,14 @@ async function syncEntry(entry) {
             // Enrich narration to preserve original party, reference, bank, and notes
             const originalNotes = entry.bankNarration || entry.notes || '';
             const refStr = entry.invoiceNumber ? ` | Ref: ${entry.invoiceNumber}` : '';
-            if (partyResolved.toLowerCase() === 'suspense' || isSuspenseRedirect) {
-                entry.notes = `[Bank Statement Entry] Original Party: ${originalPartyName}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
+            const partyDisplayName = (originalPartyName && originalPartyName.toLowerCase() !== 'upi' && originalPartyName.toLowerCase() !== 'suspense')
+                ? originalPartyName
+                : (partyName !== 'UPI' && partyName !== 'Suspense' ? partyName : '');
+
+            if (isUpi) {
+                entry.notes = `[UPI] Party: ${partyDisplayName || 'Counterparty'}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
+            } else if (partyResolved.toLowerCase() === 'suspense' || isSuspenseRedirect) {
+                entry.notes = `[Bank Statement Entry] Original Party: ${originalPartyName || partyName}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
             } else {
                 entry.notes = `[Bank Statement Entry] Party: ${partyResolved}${refStr} | Bank: ${bankResolved}\n${originalNotes}`.trim();
             }
