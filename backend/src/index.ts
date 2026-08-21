@@ -39,20 +39,19 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use(cors({
-    origin: [
-      'https://photobill-frontend-1020363630918.us-central1.run.app',
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173'
-    ],
+    origin: (origin, callback) => {
+      // Allow all local network origins, localhost, and production
+      callback(null, true);
+    },
     credentials: true
   }));
   app.use(cookieParser());
 
-  // Global UTF-8 charset and cache-disabling headers for all responses
+  // Global cache-disabling headers and API JSON content type
   app.use((req, res, next) => {
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    if (req.path.startsWith('/api')) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+    }
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
