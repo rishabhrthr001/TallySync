@@ -79,6 +79,14 @@ const Dashboard: React.FC = () => {
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<string[]>([]);
   const [groupFilterText, setGroupFilterText] = useState<string>('');
 
+  const cleanNum = (val: any): number => {
+    if (val == null) return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    const cleaned = String(val).replace(/,/g, '').replace(/[^\d.\-]/g, '').trim();
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? 0 : n;
+  };
+
   const isCloseDate = (d1: string, d2: string, daysAllowed = 10) => {
     if (!d1 || !d2) return false;
     try {
@@ -518,14 +526,6 @@ const Dashboard: React.FC = () => {
     } finally {
       setParsingBank(false);
     }
-  };
-
-  const cleanNum = (val: any): number => {
-    if (val == null) return 0;
-    if (typeof val === 'number') return isNaN(val) ? 0 : val;
-    const cleaned = String(val).replace(/,/g, '').replace(/[^\d.\-]/g, '').trim();
-    const n = parseFloat(cleaned);
-    return isNaN(n) ? 0 : n;
   };
 
   const handleConfirmAndSyncBank = async () => {
