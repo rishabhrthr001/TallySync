@@ -4,7 +4,10 @@ const lineItemSchema = new mongoose.Schema({
   name: { type: String, required: true },
   quantity: { type: Number, required: true },
   rate: { type: Number, required: true },
-  amount: { type: Number, required: true }
+  amount: { type: Number, required: true },
+  gst: { type: Number, default: 18 },
+  hsn: { type: String, default: '' },
+  unit: { type: String, default: 'Nos' }
 });
 
 const entrySchema = new mongoose.Schema({

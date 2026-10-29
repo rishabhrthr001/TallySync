@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { 
-  Search, Download, ExternalLink, RefreshCcw, CheckCircle2, Clock, XCircle, ChevronRight, TrendingUp, TrendingDown, Printer, Filter, X, RotateCcw
+  Search, Download, ExternalLink, RefreshCcw, CheckCircle2, Clock, XCircle, ChevronRight, TrendingUp, TrendingDown, Printer, Filter, X, RotateCcw, Package
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { motion, AnimatePresence } from 'motion/react';
@@ -21,6 +21,7 @@ const Entries: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
+  const [withItems, setWithItems] = useState(true);
 
   useEffect(() => {
     const q = searchParams.get('search');
@@ -82,32 +83,29 @@ const Entries: React.FC = () => {
           name: entry.partyName ? `Supply - ${entry.partyName}` : 'Taxable Item Supply', 
           quantity: 1, 
           rate: taxableVal, 
-          amount: taxableVal, 
-          gst: 18,
-          hsn: '9983' 
+          amount: taxableVal,
+          gst: 18
         }];
 
-    const formatted = {
+    setPrintData({
       type: entry.type || 'sales',
       partyName: entry.partyName || 'Cash Customer',
       partyGstin: entry.partyGstin || '',
-      partyAddress: entry.partyAddress || '',
-      invoiceNumber: entry.invoiceNumber || `INV-${Date.now().toString().slice(-4)}`,
-      date: entry.date || (entry.createdAt ? new Date(entry.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+      invoiceNumber: entry.invoiceNumber || 'INV-000',
+      date: entry.date,
       items: itemsArr,
       taxableAmount: taxableVal,
       taxAmount: taxVal,
       totalAmount: tot,
       gstType: entry.gstType || 'cgst-sgst',
       notes: entry.notes || '',
-      companyName: entry.companyName || user?.companyName || 'PHOTO BILL ENTERPRISES'
-    };
-
-    setPrintData(formatted);
+      companyName: user?.companyName || 'PhotoBill Enterprises'
+    });
     setIsPrintModalOpen(true);
   };
 
   const fetchEntries = async () => {
+    setLoading(true);
     try {
       const res = await axios.get('/api/entries', {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
@@ -136,8 +134,12 @@ const Entries: React.FC = () => {
   };
 
   const filteredEntries = entries.filter(e => {
-    const matchesSearch = e.partyName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          e.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase());
+    const itemMatch = Array.isArray(e.items) && e.items.some((i: any) => 
+      (i.name || '').toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    const matchesSearch = (e.partyName || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          (e.invoiceNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          itemMatch;
     
     let matchesDate = true;
     if (dateFrom) matchesDate = matchesDate && e.date >= dateFrom;
@@ -187,14 +189,37 @@ const Entries: React.FC = () => {
             <Search className="absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Search by Party Name or Invoice Ref..."
+              placeholder="Search by Item Name, Party Name, or Invoice Ref..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/80 rounded-2xl text-xs font-semibold text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 shadow-xs"
             />
           </div>
 
-          <div className="flex items-center gap-3 w-full lg:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+            {/* With / Without Items Toggle */}
+            <div className="flex items-center bg-white p-1 border border-slate-200/80 rounded-2xl shadow-xs">
+              <button
+                type="button"
+                onClick={() => setWithItems(true)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  withItems ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5" />
+                With Items
+              </button>
+              <button
+                type="button"
+                onClick={() => setWithItems(false)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  !withItems ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Summary Only
+              </button>
+            </div>
+
             <div className="flex items-center gap-2 bg-white px-3 py-1.5 border border-slate-200/80 rounded-2xl shadow-xs text-xs font-semibold text-slate-600 w-full sm:w-auto">
               <Filter className="w-3.5 h-3.5 text-slate-400" />
               <span>From</span>
@@ -224,8 +249,10 @@ const Entries: React.FC = () => {
               <tr className="border-b border-slate-150 bg-slate-50/70 text-[10px] font-black uppercase text-slate-400 tracking-wider">
                 <th className="py-4 px-6">Voucher / Date</th>
                 <th className="py-4 px-6">Party Name</th>
-                <th className="py-4 px-6">Total Amount</th>
-                <th className="py-4 px-6">Sync Status</th>
+                <th className="py-4 px-6 text-center">Type</th>
+                {withItems && <th className="py-4 px-6">Item Details & Breakdown</th>}
+                <th className="py-4 px-6 text-right">Total Amount</th>
+                <th className="py-4 px-6 text-center">Sync Status</th>
                 <th className="py-4 px-6 text-right">Actions</th>
               </tr>
             </thead>
@@ -239,9 +266,20 @@ const Entries: React.FC = () => {
                     transition={{ delay: idx * 0.02 }}
                     className="hover:bg-indigo-50/30 transition-colors group"
                   >
-                    <td className="px-8 py-5">
-                      <div className="text-sm font-black text-slate-800 leading-tight">{e.partyName}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
+                    <td className="px-6 py-5 align-top">
+                      <div className="text-sm font-black text-slate-900 font-mono leading-tight">{e.invoiceNumber || 'NO-REF'}</div>
+                      <div className="text-[11px] font-semibold text-slate-400 mt-1 font-mono">
+                        {new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </div>
+                    </td>
+                    <td className="px-6 py-5 align-top">
+                      <div className="text-sm font-black text-slate-800 leading-tight">{e.partyName || 'Cash / Counter'}</div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        {e.partyGstin ? (
+                          <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                            {e.partyGstin}
+                          </span>
+                        ) : null}
                         {e.bankLedger && (
                           <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100/80">
                             🏦 {e.bankLedger}
@@ -250,7 +288,7 @@ const Entries: React.FC = () => {
                         {e.notes && <span className="text-[11px] text-slate-400 truncate max-w-xs">{e.notes}</span>}
                       </div>
                     </td>
-                    <td className="px-8 py-5 text-center">
+                    <td className="px-6 py-5 text-center align-top">
                       <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
                         e.type === 'sales' ? 'bg-indigo-50 text-indigo-700' : 
                         e.type === 'purchase' ? 'bg-amber-50 text-amber-700' :
@@ -263,7 +301,36 @@ const Entries: React.FC = () => {
                         {e.type}
                       </span>
                     </td>
-                    <td className="px-8 py-5">
+                    {withItems && (
+                      <td className="px-6 py-4 align-top">
+                        {e.items && e.items.length > 0 ? (
+                          <div className="space-y-1.5 min-w-[240px] max-w-sm">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              {e.items.length} Item{e.items.length > 1 ? 's' : ''}
+                            </span>
+                            <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                              {e.items.map((it: any, itIdx: number) => (
+                                <div key={itIdx} className="flex justify-between items-center text-xs bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200/60">
+                                  <span className="font-bold text-slate-800 truncate mr-2" title={it.name}>{it.name}</span>
+                                  <span className="font-mono text-[11px] text-slate-600 font-bold whitespace-nowrap">
+                                    {it.quantity} {it.unit || 'Nos'} × ₹{it.rate} = <strong className="text-slate-900">{formatCurrency(it.amount || it.quantity * it.rate)}</strong>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400 italic">No item details (Accounting Voucher)</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-6 py-5 text-right font-black text-slate-900 text-sm font-mono align-top">
+                      <div>{formatCurrency(e.totalAmount || 0)}</div>
+                      {e.taxableAmount > 0 && (
+                        <div className="text-[10px] text-slate-400 font-medium">Taxable: {formatCurrency(e.taxableAmount)}</div>
+                      )}
+                    </td>
+                    <td className="px-6 py-5 align-top">
                       {(() => {
                         const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
                         return (
@@ -317,10 +384,7 @@ const Entries: React.FC = () => {
                         );
                       })()}
                     </td>
-                    <td className="px-8 py-5 text-right font-black text-slate-900 text-sm font-mono">
-                      {formatCurrency(e.totalAmount || 0)}
-                    </td>
-                    <td className="px-8 py-5 text-right">
+                    <td className="px-6 py-5 text-right align-top">
                       <div className="flex justify-end gap-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                         <button 
                           onClick={() => triggerPrint(e)}
@@ -379,6 +443,22 @@ const Entries: React.FC = () => {
                   <span className="text-sm font-bold text-slate-800">{e.partyName}</span>
                   {e.notes && <p className="text-xs text-slate-400 mt-1 italic leading-tight truncate">{e.notes}</p>}
                 </div>
+
+                {withItems && e.items && e.items.length > 0 && (
+                  <div className="border-t border-slate-100 pt-2 space-y-1">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                      Items ({e.items.length})
+                    </span>
+                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                      {e.items.map((it: any, iIdx: number) => (
+                        <div key={iIdx} className="flex justify-between items-center text-xs text-slate-700">
+                          <span className="truncate mr-2 font-medium">{it.name}</span>
+                          <span className="font-mono font-bold whitespace-nowrap">{it.quantity} × ₹{it.rate}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between border-t border-slate-100 pt-3">
                   <div>

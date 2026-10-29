@@ -805,7 +805,7 @@ CRITICAL INSTRUCTIONS:
 Return strictly valid JSON following the schema.`;
 
   try {
-    const model = getModel();
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     const result = await model.generateContent({
       contents: [
         {
