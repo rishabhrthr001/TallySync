@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { 
-  Search, Download, ExternalLink, RefreshCcw, CheckCircle2, Clock, XCircle, ChevronRight, TrendingUp, TrendingDown, Printer, Filter, X, RotateCcw, Package
+  Search, Download, ExternalLink, RefreshCcw, CheckCircle2, Clock, XCircle, ChevronRight, TrendingUp, TrendingDown, Printer, Filter, X, RotateCcw, Package, AlertTriangle
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { motion, AnimatePresence } from 'motion/react';
@@ -22,6 +22,7 @@ const Entries: React.FC = () => {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
   const [withItems, setWithItems] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all');
 
   useEffect(() => {
     const q = searchParams.get('search');
@@ -68,8 +69,27 @@ const Entries: React.FC = () => {
     }
   }, [shouldPrint, printData]);
 
+  const fetchEntries = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
+    try {
+      const res = await axios.get('/api/entries', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      setEntries(res.data || []);
+    } catch (err) {
+      console.error('Error fetching entries', err);
+    } finally {
+      if (!isBackground) setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchEntries();
+    // Live background auto-polling every 3.5s to track Tally sync success / failure / retry automatically
+    const interval = setInterval(() => {
+      fetchEntries(true);
+    }, 3500);
+    return () => clearInterval(interval);
   }, []);
 
   const triggerPrint = (entry: any) => {
@@ -104,20 +124,6 @@ const Entries: React.FC = () => {
     setIsPrintModalOpen(true);
   };
 
-  const fetchEntries = async () => {
-    setLoading(true);
-    try {
-      const res = await axios.get('/api/entries', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
-      setEntries(res.data);
-    } catch (err) {
-      console.error('Error fetching entries', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleRetryEntry = async (id: string) => {
     setRetryingId(id);
     try {
@@ -133,6 +139,10 @@ const Entries: React.FC = () => {
     }
   };
 
+  const successCount = entries.filter(e => e.status === 'success').length;
+  const failedCount = entries.filter(e => e.status === 'failed').length;
+  const pendingCount = entries.filter(e => e.status === 'pending').length;
+
   const filteredEntries = entries.filter(e => {
     const itemMatch = Array.isArray(e.items) && e.items.some((i: any) => 
       (i.name || '').toLowerCase().includes(searchTerm.toLowerCase())
@@ -145,7 +155,12 @@ const Entries: React.FC = () => {
     if (dateFrom) matchesDate = matchesDate && e.date >= dateFrom;
     if (dateTo) matchesDate = matchesDate && e.date <= dateTo;
 
-    return matchesSearch && matchesDate;
+    let matchesStatus = true;
+    if (statusFilter !== 'all') {
+      matchesStatus = e.status === statusFilter;
+    }
+
+    return matchesSearch && matchesDate && matchesStatus;
   });
 
   if (loading) return (
@@ -158,433 +173,460 @@ const Entries: React.FC = () => {
     <Layout>
       <div className="print-hidden-mobile">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-8">
-        <div>
-          <span className="text-xs font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-wider">Audit History</span>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tight mt-1.5">Voucher History</h2>
-          <p className="text-slate-400 text-sm font-semibold mt-0.5">Reprint generated bills and monitor sync states</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => window.open('https://ewaybillgst.gov.in/', '_blank')}
-            className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-xs uppercase tracking-wider shadow-md flex items-center gap-2 transition-all cursor-pointer"
-          >
-            <ExternalLink className="w-4 h-4 text-emerald-400" />
-            E-Way Bill Portal
-          </button>
-          <button 
-            onClick={fetchEntries} 
-            className="p-3 text-slate-500 hover:text-indigo-600 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
-            title="Refresh Entries"
-          >
-            <RefreshCcw className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.02)] overflow-hidden">
-        {/* Filters Header */}
-        <div className="p-5 border-b border-slate-150 bg-slate-50/50 flex flex-col lg:flex-row gap-4 items-center">
-          <div className="relative flex-1 w-full">
-            <Search className="absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Search by Item Name, Party Name, or Invoice Ref..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/80 rounded-2xl text-xs font-semibold text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 shadow-xs"
-            />
+          <div>
+            <span className="text-xs font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-wider">Audit History</span>
+            <h2 className="text-3xl font-black text-slate-900 tracking-tight mt-1.5">Voucher History & Sync Status</h2>
+            <p className="text-slate-400 text-sm font-semibold mt-0.5">Track live Tally sync success, view error reasons, and retry failed bills</p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-            {/* With / Without Items Toggle */}
-            <div className="flex items-center bg-white p-1 border border-slate-200/80 rounded-2xl shadow-xs">
-              <button
-                type="button"
-                onClick={() => setWithItems(true)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  withItems ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <Package className="w-3.5 h-3.5" />
-                With Items
-              </button>
-              <button
-                type="button"
-                onClick={() => setWithItems(false)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  !withItems ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Summary Only
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 bg-white px-3 py-1.5 border border-slate-200/80 rounded-2xl shadow-xs text-xs font-semibold text-slate-600 w-full sm:w-auto">
-              <Filter className="w-3.5 h-3.5 text-slate-400" />
-              <span>From</span>
-              <input 
-                type="date" 
-                value={dateFrom} 
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="bg-transparent outline-none font-mono text-slate-800"
-              />
-            </div>
-            <div className="flex items-center gap-2 bg-white px-3 py-1.5 border border-slate-200/80 rounded-2xl shadow-xs text-xs font-semibold text-slate-600 w-full sm:w-auto">
-              <span>To</span>
-              <input 
-                type="date" 
-                value={dateTo} 
-                onChange={(e) => setDateTo(e.target.value)}
-                className="bg-transparent outline-none font-mono text-slate-800"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Table View */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-150 bg-slate-50/70 text-[10px] font-black uppercase text-slate-400 tracking-wider">
-                <th className="py-4 px-6">Voucher / Date</th>
-                <th className="py-4 px-6">Party Name</th>
-                <th className="py-4 px-6 text-center">Type</th>
-                {withItems && <th className="py-4 px-6">Item Details & Breakdown</th>}
-                <th className="py-4 px-6 text-right">Total Amount</th>
-                <th className="py-4 px-6 text-center">Sync Status</th>
-                <th className="py-4 px-6 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-sm">
-              <AnimatePresence>
-                {filteredEntries.map((e, idx) => (
-                  <motion.tr 
-                    key={e._id}
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.02 }}
-                    className="hover:bg-indigo-50/30 transition-colors group"
-                  >
-                    <td className="px-6 py-5 align-top">
-                      <div className="text-sm font-black text-slate-900 font-mono leading-tight">{e.invoiceNumber || 'NO-REF'}</div>
-                      <div className="text-[11px] font-semibold text-slate-400 mt-1 font-mono">
-                        {new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </div>
-                    </td>
-                    <td className="px-6 py-5 align-top">
-                      <div className="text-sm font-black text-slate-800 leading-tight">{e.partyName || 'Cash / Counter'}</div>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        {e.partyGstin ? (
-                          <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                            {e.partyGstin}
-                          </span>
-                        ) : null}
-                        {e.bankLedger && (
-                          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100/80">
-                            🏦 {e.bankLedger}
-                          </span>
-                        )}
-                        {e.notes && <span className="text-[11px] text-slate-400 truncate max-w-xs">{e.notes}</span>}
-                      </div>
-                    </td>
-                    <td className="px-6 py-5 text-center align-top">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
-                        e.type === 'sales' ? 'bg-indigo-50 text-indigo-700' : 
-                        e.type === 'purchase' ? 'bg-amber-50 text-amber-700' :
-                        e.type === 'receipt' ? 'bg-emerald-50 text-emerald-700' :
-                        e.type === 'payment' ? 'bg-rose-50 text-rose-700' :
-                        e.type === 'contra' ? 'bg-purple-50 text-purple-700' :
-                        'bg-slate-100 text-slate-700'
-                      }`}>
-                        {e.type === 'sales' || e.type === 'receipt' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                        {e.type}
-                      </span>
-                    </td>
-                    {withItems && (
-                      <td className="px-6 py-4 align-top">
-                        {e.items && e.items.length > 0 ? (
-                          <div className="space-y-1.5 min-w-[240px] max-w-sm">
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
-                              {e.items.length} Item{e.items.length > 1 ? 's' : ''}
-                            </span>
-                            <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
-                              {e.items.map((it: any, itIdx: number) => (
-                                <div key={itIdx} className="flex justify-between items-center text-xs bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200/60">
-                                  <span className="font-bold text-slate-800 truncate mr-2" title={it.name}>{it.name}</span>
-                                  <span className="font-mono text-[11px] text-slate-600 font-bold whitespace-nowrap">
-                                    {it.quantity} {it.unit || 'Nos'} × ₹{it.rate} = <strong className="text-slate-900">{formatCurrency(it.amount || it.quantity * it.rate)}</strong>
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400 italic">No item details (Accounting Voucher)</span>
-                        )}
-                      </td>
-                    )}
-                    <td className="px-6 py-5 text-right font-black text-slate-900 text-sm font-mono align-top">
-                      <div>{formatCurrency(e.totalAmount || 0)}</div>
-                      {e.taxableAmount > 0 && (
-                        <div className="text-[10px] text-slate-400 font-medium">Taxable: {formatCurrency(e.taxableAmount)}</div>
-                      )}
-                    </td>
-                    <td className="px-6 py-5 align-top">
-                      {(() => {
-                        const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
-                        return (
-                          <div className="flex flex-col items-center justify-center gap-1.5 max-w-[220px] mx-auto">
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
-                              e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
-                              e.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-100' : 
-                              'bg-amber-50 text-amber-700 animate-pulse border border-amber-100'
-                            }`}>
-                              {e.status === 'success' ? <CheckCircle2 className="h-3.5 w-3.5 stroke-[2.2]" /> : 
-                               e.status === 'failed' ? <XCircle className="h-3.5 w-3.5 stroke-[2.2]" /> : 
-                               <Clock className="h-3.5 w-3.5 stroke-[2.2]" />}
-                              {info.badgeText}
-                            </span>
-
-                            {/* Failure reason & Actionable Hint & Retry */}
-                            {e.status === 'failed' && (
-                              <div className="flex flex-col items-center gap-1 mt-0.5 w-full">
-                                <span className="text-[10px] font-bold text-rose-700 bg-rose-50/90 px-2.5 py-1 rounded-lg border border-rose-200/70 leading-tight break-words text-center w-full" title={info.detail}>
-                                  {info.headline}
-                                </span>
-                                {info.hint && (
-                                  <span className="text-[8.5px] font-medium text-slate-500 text-center leading-tight">
-                                    💡 {info.hint}
-                                  </span>
-                                )}
-                                <button
-                                  onClick={() => handleRetryEntry(e._id)}
-                                  disabled={retryingId === e._id}
-                                  className="inline-flex items-center gap-1 px-3 py-1 mt-0.5 text-[9px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
-                                  title="Re-queue entry for Tally sync"
-                                >
-                                  <RotateCcw className={`h-2.5 w-2.5 ${retryingId === e._id ? 'animate-spin' : ''}`} />
-                                  {retryingId === e._id ? 'Retrying...' : 'Retry Sync'}
-                                </button>
-                              </div>
-                            )}
-
-                            {/* Pending reason & guidance */}
-                            {e.status === 'pending' && (
-                              <div className="flex flex-col items-center gap-0.5 mt-0.5 w-full">
-                                <span className="text-[9.5px] font-bold text-amber-800 bg-amber-50/90 px-2.5 py-1 rounded-lg border border-amber-200/70 leading-tight break-words text-center w-full" title={info.detail}>
-                                  {info.headline}
-                                </span>
-                                <span className="text-[8.5px] font-medium text-slate-400 text-center">
-                                  Runs automatically on Tally PC
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-6 py-5 text-right align-top">
-                      <div className="flex justify-end gap-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-                        <button 
-                          onClick={() => triggerPrint(e)}
-                          className="px-4 py-2 bg-slate-100 hover:bg-indigo-600 text-slate-700 hover:text-white font-bold text-[10px] uppercase tracking-wider rounded-xl flex items-center gap-2 inline-flex transition-all cursor-pointer"
-                        >
-                          <Printer className="h-3.5 w-3.5" /> Print Invoice
-                        </button>
-                      </div>
-                    </td>
-                  </motion.tr>
-                ))}
-              </AnimatePresence>
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile Card Grid View */}
-        <div className="block md:hidden p-4 space-y-4">
-          <AnimatePresence>
-            {filteredEntries.map((e, idx) => {
-              const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
-              return (
-              <motion.div
-                key={e._id}
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: idx * 0.03 }}
-                className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-[0_5px_15px_-5px_rgba(0,0,0,0.02)] space-y-4"
-              >
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-2.5">
-                    <div className={`p-2 rounded-xl ${
-                      e.type === 'sales' ? 'bg-indigo-50 text-indigo-600' : 'bg-amber-50 text-amber-600'
-                    }`}>
-                      {e.type === 'sales' ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-black text-slate-400 uppercase font-mono tracking-wider">{e.date}</span>
-                      <h4 className="text-sm font-black text-slate-900 leading-tight">{e.invoiceNumber || 'NO-REF'}</h4>
-                    </div>
-                  </div>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
-                    e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
-                    e.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-100' : 
-                    'bg-amber-50 text-amber-700 animate-pulse border border-amber-100'
-                  }`}>
-                    {e.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> : 
-                     e.status === 'failed' ? <XCircle className="h-3 w-3" /> : 
-                     <Clock className="h-3 w-3" />}
-                    {info.badgeText}
-                  </span>
-                </div>
-
-                <div className="border-t border-slate-100 pt-3">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Party</span>
-                  <span className="text-sm font-bold text-slate-800">{e.partyName}</span>
-                  {e.notes && <p className="text-xs text-slate-400 mt-1 italic leading-tight truncate">{e.notes}</p>}
-                </div>
-
-                {withItems && e.items && e.items.length > 0 && (
-                  <div className="border-t border-slate-100 pt-2 space-y-1">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
-                      Items ({e.items.length})
-                    </span>
-                    <div className="space-y-1 max-h-24 overflow-y-auto">
-                      {e.items.map((it: any, iIdx: number) => (
-                        <div key={iIdx} className="flex justify-between items-center text-xs text-slate-700">
-                          <span className="truncate mr-2 font-medium">{it.name}</span>
-                          <span className="font-mono font-bold whitespace-nowrap">{it.quantity} × ₹{it.rate}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-                  <div>
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Total Amount</span>
-                    <span className="text-base font-black text-slate-900 font-mono">{formatCurrency(e.totalAmount || 0)}</span>
-                  </div>
-                </div>
-
-                {e.status === 'failed' && (
-                  <div className="p-3.5 bg-rose-50 border border-rose-200/80 text-rose-800 rounded-2xl text-xs space-y-2">
-                    <div className="font-bold text-rose-900 flex items-center gap-1.5">
-                      <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                      {info.headline}
-                    </div>
-                    <p className="text-[11px] text-rose-700/90 leading-relaxed font-medium">
-                      {info.detail}
-                    </p>
-                    {info.hint && (
-                      <p className="text-[10px] text-slate-600 bg-white/60 p-2 rounded-xl border border-rose-100 leading-snug">
-                        💡 <strong>How to fix:</strong> {info.hint}
-                      </p>
-                    )}
-                    <button
-                      onClick={() => handleRetryEntry(e._id)}
-                      disabled={retryingId === e._id}
-                      className="inline-flex items-center gap-1 px-3 py-2 text-[10px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50 w-full justify-center"
-                    >
-                      <RotateCcw className={`h-3 w-3 ${retryingId === e._id ? 'animate-spin' : ''}`} />
-                      {retryingId === e._id ? 'Retrying...' : 'Retry Tally Sync'}
-                    </button>
-                  </div>
-                )}
-
-                {e.status === 'pending' && (
-                  <div className="p-3 bg-amber-50/80 border border-amber-200/70 text-amber-900 rounded-2xl text-xs space-y-1">
-                    <div className="font-bold flex items-center gap-1.5 text-amber-900">
-                      <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      {info.headline}
-                    </div>
-                    <p className="text-[10.5px] text-amber-700 leading-snug">
-                      {info.detail}
-                    </p>
-                  </div>
-                )}
-
-                <button 
-                  onClick={() => triggerPrint(e)}
-                  className="w-full py-3 bg-slate-50 hover:bg-indigo-50 border border-slate-200 active:border-indigo-200 text-slate-700 active:text-indigo-600 font-bold text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
-                >
-                  <Printer className="h-4 w-4" /> Print Invoice
-                </button>
-              </motion.div>
-            );})}
-          </AnimatePresence>
-        </div>
-
-        {filteredEntries.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 text-slate-400">
-            <Search className="h-10 w-10 opacity-20 mb-4" />
-            <p className="font-bold text-lg">No bills matched your criteria</p>
-            <button 
-              onClick={() => {setSearchTerm(''); setDateFrom(''); setDateTo('');}} 
-              className="text-indigo-600 font-bold hover:underline underline-offset-4 mt-2 cursor-pointer"
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => window.open('https://ewaybillgst.gov.in/', '_blank')}
+              className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-xs uppercase tracking-wider shadow-md flex items-center gap-2 transition-all cursor-pointer"
             >
-              Clear all filters
+              <ExternalLink className="w-4 h-4 text-emerald-400" />
+              E-Way Bill Portal
+            </button>
+            <button 
+              onClick={() => fetchEntries()} 
+              className="p-3 text-slate-500 hover:text-indigo-600 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors shadow-sm cursor-pointer flex items-center gap-1.5"
+              title="Refresh Entries"
+            >
+              <RefreshCcw className="h-4 w-4" />
             </button>
           </div>
-        )}
-      </div>
-    </div>
+        </div>
 
-      {/* Screen-Only Print Preview Modal */}
-      <AnimatePresence>
-        {isPrintModalOpen && printData && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-900/80 backdrop-blur-md overflow-y-auto print:hidden">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col my-auto border border-slate-200"
-            >
-              {/* Modal Header Bar */}
-              <div className="p-4 sm:p-6 bg-slate-900 text-white flex justify-between items-center border-b border-slate-800">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center text-white">
-                    <Printer className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-white">Tax Invoice Preview</h3>
-                    <p className="text-xs text-slate-400 font-semibold">{printData.invoiceNumber} • {printData.partyName}</p>
-                  </div>
-                </div>
+        <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_10px_40px_-20px_rgba(0,0,0,0.02)] overflow-hidden">
+          {/* Filters Header */}
+          <div className="p-5 border-b border-slate-150 bg-slate-50/50 flex flex-col lg:flex-row gap-4 items-center">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Search by Item Name, Party Name, or Invoice Ref..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/80 rounded-2xl text-xs font-semibold text-slate-800 placeholder-slate-400 outline-none focus:border-indigo-500 shadow-xs"
+              />
+            </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handlePrintAction()}
-                    className="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-emerald-500 hover:from-indigo-600 hover:to-emerald-600 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all cursor-pointer"
-                  >
-                    <Printer className="w-4 h-4" /> Confirm Print / Save PDF
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsPrintModalOpen(false)}
-                    className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
+            <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+              {/* With / Without Items Toggle */}
+              <div className="flex items-center bg-white p-1 border border-slate-200/80 rounded-2xl shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setWithItems(true)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    withItems ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  With Items
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWithItems(false)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    !withItems ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Summary Only
+                </button>
               </div>
 
-              {/* Screen Invoice Body */}
-              <div className="p-4 sm:p-8 bg-white overflow-y-auto max-h-[80vh]">
-                <PrintableInvoice data={printData} user={user} />
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 border border-slate-200/80 rounded-2xl shadow-xs text-xs font-semibold text-slate-600 w-full sm:w-auto">
+                <Filter className="w-3.5 h-3.5 text-slate-400" />
+                <span>From</span>
+                <input 
+                  type="date" 
+                  value={dateFrom} 
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="bg-transparent outline-none font-mono text-slate-800"
+                />
               </div>
-            </motion.div>
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 border border-slate-200/80 rounded-2xl shadow-xs text-xs font-semibold text-slate-600 w-full sm:w-auto">
+                <span>To</span>
+                <input 
+                  type="date" 
+                  value={dateTo} 
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="bg-transparent outline-none font-mono text-slate-800"
+                />
+              </div>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
 
-      {/* Dedicated Standalone Native Print Container */}
-      <div id="printable-invoice-root" className="hidden print:block print:static absolute top-[-9999px] left-[-9999px] font-sans text-black">
-        {printData && <PrintableInvoice ref={printRef} data={printData} user={user} />}
+          {/* Sync Status Filter Bar with Live Counter */}
+          <div className="px-5 py-3 border-b border-slate-150 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 mr-1 hidden sm:inline">Tally Status:</span>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  statusFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                }`}
+              >
+                All ({entries.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('success')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  statusFilter === 'success'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Synced ({successCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('failed')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  statusFilter === 'failed'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : failedCount > 0 
+                      ? 'bg-rose-50 text-rose-700 border-2 border-rose-300 font-black animate-pulse'
+                      : 'bg-white text-rose-700 hover:bg-rose-50 border border-rose-200'
+                }`}
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                Failed ({failedCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('pending')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  statusFilter === 'pending'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-200'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                Pending ({pendingCount})
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                Live Auto-Sync
+              </span>
+            </div>
+          </div>
+
+          {/* Table View */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-150 bg-slate-50/70 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                  <th className="py-4 px-6">Voucher / Date</th>
+                  <th className="py-4 px-6">Party Name</th>
+                  <th className="py-4 px-6 text-center">Type</th>
+                  {withItems && <th className="py-4 px-6">Item Details & Breakdown</th>}
+                  <th className="py-4 px-6 text-right">Total Amount</th>
+                  <th className="py-4 px-6 text-center w-60">Sync Status & Actions</th>
+                  <th className="py-4 px-6 text-right">Print</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                <AnimatePresence>
+                  {filteredEntries.map((e, idx) => (
+                    <motion.tr 
+                      key={e._id}
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.02 }}
+                      className="hover:bg-indigo-50/30 transition-colors group"
+                    >
+                      <td className="px-6 py-5 align-top">
+                        <div className="text-sm font-black text-slate-900 font-mono leading-tight">{e.invoiceNumber || 'NO-REF'}</div>
+                        <div className="text-xs font-semibold text-slate-400 mt-1">{e.date}</div>
+                        {e.companyName && (
+                          <div className="text-[10px] font-bold text-slate-400 mt-0.5 truncate max-w-[150px]" title={e.companyName}>
+                            🏢 {e.companyName}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-5 align-top">
+                        <div className="font-bold text-slate-900 text-sm">{e.partyName}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                          {e.partyGstin ? (
+                            <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                              {e.partyGstin}
+                            </span>
+                          ) : null}
+                          {e.bankLedger && (
+                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100/80">
+                              🏦 {e.bankLedger}
+                            </span>
+                          )}
+                          {e.notes && <span className="text-[11px] text-slate-400 truncate max-w-xs">{e.notes}</span>}
+                        </div>
+                      </td>
+                      <td className="px-6 py-5 text-center align-top">
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
+                          e.type === 'sales' ? 'bg-indigo-50 text-indigo-700' : 
+                          e.type === 'purchase' ? 'bg-amber-50 text-amber-700' :
+                          e.type === 'receipt' ? 'bg-emerald-50 text-emerald-700' :
+                          e.type === 'payment' ? 'bg-rose-50 text-rose-700' :
+                          e.type === 'contra' ? 'bg-purple-50 text-purple-700' :
+                          'bg-slate-100 text-slate-700'
+                        }`}>
+                          {e.type === 'sales' || e.type === 'receipt' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                          {e.type}
+                        </span>
+                      </td>
+                      {withItems && (
+                        <td className="px-6 py-4 align-top">
+                          {e.items && e.items.length > 0 ? (
+                            <div className="space-y-1.5 min-w-[240px] max-w-sm">
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                {e.items.length} Item{e.items.length > 1 ? 's' : ''}
+                              </span>
+                              <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                                {e.items.map((it: any, itIdx: number) => (
+                                  <div key={itIdx} className="flex justify-between items-center text-xs bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200/60">
+                                    <span className="font-bold text-slate-800 truncate mr-2" title={it.name}>{it.name}</span>
+                                    <span className="font-mono text-[11px] text-slate-600 font-bold whitespace-nowrap">
+                                      {it.quantity} {it.unit || 'Nos'} × ₹{it.rate} = <strong className="text-slate-900">{formatCurrency(it.amount || it.quantity * it.rate)}</strong>
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 italic">No item details (Accounting Voucher)</span>
+                          )}
+                        </td>
+                      )}
+                      <td className="px-6 py-5 text-right font-black text-slate-900 text-sm font-mono align-top">
+                        <div>{formatCurrency(e.totalAmount || 0)}</div>
+                        {e.taxableAmount > 0 && (
+                          <div className="text-[10px] text-slate-400 font-medium">Taxable: {formatCurrency(e.taxableAmount)}</div>
+                        )}
+                      </td>
+                      <td className="px-6 py-5 align-top">
+                        {(() => {
+                          const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
+                          return (
+                            <div className="flex flex-col items-center justify-center gap-1.5 max-w-[240px] mx-auto">
+                              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
+                                e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs' : 
+                                e.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-200 shadow-xs' : 
+                                'bg-amber-50 text-amber-700 animate-pulse border border-amber-200 shadow-xs'
+                              }`}>
+                                {e.status === 'success' ? <CheckCircle2 className="h-3.5 w-3.5 stroke-[2.5] text-emerald-600" /> : 
+                                 e.status === 'failed' ? <XCircle className="h-3.5 w-3.5 stroke-[2.5] text-rose-600" /> : 
+                                 <Clock className="h-3.5 w-3.5 stroke-[2.5] text-amber-600" />}
+                                {e.status === 'success' ? 'Synced to Tally' : (e.status === 'failed' ? 'Sync Failed' : 'Syncing to Tally...')}
+                              </span>
+
+                              {/* Failure reason & Actionable Hint & Retry Button */}
+                              {e.status === 'failed' && (
+                                <div className="flex flex-col items-center gap-1 mt-1 w-full">
+                                  <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 leading-tight break-words text-center w-full" title={info.detail}>
+                                    {info.headline}
+                                  </span>
+                                  {info.hint && (
+                                    <span className="text-[8.5px] font-medium text-slate-500 text-center leading-tight">
+                                      💡 {info.hint}
+                                    </span>
+                                  )}
+                                  <button
+                                    onClick={() => handleRetryEntry(e._id)}
+                                    disabled={retryingId === e._id}
+                                    className="inline-flex items-center gap-1 px-3 py-1 mt-0.5 text-[9px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                                    title="Re-queue entry for Tally sync"
+                                  >
+                                    <RotateCcw className={`h-2.5 w-2.5 ${retryingId === e._id ? 'animate-spin' : ''}`} />
+                                    {retryingId === e._id ? 'Retrying...' : 'Retry Sync'}
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Pending reason & guidance */}
+                              {e.status === 'pending' && (
+                                <div className="flex flex-col items-center gap-0.5 mt-0.5 w-full">
+                                  <span className="text-[9.5px] font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 leading-tight break-words text-center w-full" title={info.detail}>
+                                    {info.headline}
+                                  </span>
+                                  <span className="text-[8.5px] font-medium text-slate-400 text-center">
+                                    Runs automatically on Tally PC
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-6 py-5 text-right align-top">
+                        <button 
+                          onClick={() => triggerPrint(entryWithDefaults(e))}
+                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer inline-flex items-center justify-center"
+                          title="Print Invoice Voucher"
+                        >
+                          <Printer className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+
+                {filteredEntries.length === 0 && (
+                  <tr>
+                    <td colSpan={withItems ? 7 : 6} className="text-center py-12 text-slate-400">
+                      No matching vouchers found for "{statusFilter === 'all' ? searchTerm : `${statusFilter} status`}"
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {filteredEntries.map(e => {
+              const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
+              return (
+                <div key={e._id} className="p-4 space-y-3">
+                  <div className="flex justify-between items-start gap-2">
+                    <div>
+                      <div className="text-sm font-black text-slate-900 font-mono">{e.invoiceNumber || 'NO-REF'}</div>
+                      <div className="text-xs text-slate-400 font-semibold">{e.date}</div>
+                    </div>
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-black text-[9px] uppercase tracking-wider ${
+                      e.type === 'sales' ? 'bg-indigo-50 text-indigo-700' : 
+                      e.type === 'purchase' ? 'bg-amber-50 text-amber-700' :
+                      e.type === 'receipt' ? 'bg-emerald-50 text-emerald-700' :
+                      e.type === 'payment' ? 'bg-rose-50 text-rose-700' :
+                      e.type === 'contra' ? 'bg-purple-50 text-purple-700' :
+                      'bg-slate-100 text-slate-700'
+                    }`}>
+                      {e.type}
+                    </span>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">{e.partyName}</h4>
+                    {e.partyGstin && <p className="text-[10px] font-mono text-slate-400 mt-0.5">{e.partyGstin}</p>}
+                    {e.notes && <p className="text-xs text-slate-400 mt-1 italic leading-tight truncate">{e.notes}</p>}
+                  </div>
+
+                  {withItems && e.items && e.items.length > 0 && (
+                    <div className="border-t border-slate-100 pt-2 space-y-1">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                        Items ({e.items.length})
+                      </span>
+                      <div className="space-y-1 max-h-24 overflow-y-auto">
+                        {e.items.map((it: any, iIdx: number) => (
+                          <div key={iIdx} className="flex justify-between items-center text-xs text-slate-700">
+                            <span className="truncate mr-2 font-medium">{it.name}</span>
+                            <span className="font-mono font-bold whitespace-nowrap">{it.quantity} × ₹{it.rate}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Total Amount</span>
+                      <span className="text-base font-black text-slate-900 font-mono">{formatCurrency(e.totalAmount || 0)}</span>
+                    </div>
+
+                    {/* Status Indicator */}
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider ${
+                        e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 
+                        e.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 
+                        'bg-amber-50 text-amber-700 animate-pulse border border-amber-200'
+                      }`}>
+                        {e.status === 'success' ? <CheckCircle2 className="h-3.5 w-3.5 stroke-[2.2] text-emerald-600" /> : 
+                         e.status === 'failed' ? <XCircle className="h-3.5 w-3.5 stroke-[2.2] text-rose-600" /> : 
+                         <Clock className="h-3.5 w-3.5 stroke-[2.2] text-amber-600" />}
+                        {e.status === 'success' ? 'Synced to Tally' : (e.status === 'failed' ? 'Sync Failed' : 'Syncing to Tally...')}
+                      </span>
+                      <button 
+                        onClick={() => triggerPrint(entryWithDefaults(e))}
+                        className="p-2 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-xl"
+                      >
+                        <Printer className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {e.status === 'failed' && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs space-y-1.5">
+                      <div className="font-bold flex items-center gap-1.5 text-rose-900">
+                        <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        {info.headline}
+                      </div>
+                      <p className="text-slate-600 text-[11px] leading-relaxed">
+                        {info.detail}
+                      </p>
+                      {info.hint && (
+                        <p className="text-indigo-700 font-medium text-[10px] bg-white p-2 rounded-xl border border-indigo-100">
+                          💡 <strong>Hint:</strong> {info.hint}
+                        </p>
+                      )}
+                      <button
+                        onClick={() => handleRetryEntry(e._id)}
+                        disabled={retryingId === e._id}
+                        className="inline-flex items-center gap-1 px-3 py-2 text-[10px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50 w-full justify-center"
+                      >
+                        <RotateCcw className={`h-3 w-3 ${retryingId === e._id ? 'animate-spin' : ''}`} />
+                        {retryingId === e._id ? 'Retrying...' : 'Retry Tally Sync'}
+                      </button>
+                    </div>
+                  )}
+
+                  {e.status === 'pending' && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl text-xs space-y-1">
+                      <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                        <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        {info.headline}
+                      </div>
+                      <p className="text-amber-800 text-[11px]">
+                        {info.detail}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Hidden print container */}
+      <div className="hidden print:block font-sans text-black">
+        <PrintableInvoice ref={printRef} data={printData} user={user} />
       </div>
     </Layout>
   );
 };
+
+// Helper for print defaults
+function entryWithDefaults(e: any) {
+  const tot = Number(e.totalAmount || 0);
+  const taxableVal = Number(e.taxableAmount || (tot > 0 ? Number((tot / 1.18).toFixed(2)) : 0));
+  const taxVal = Number(e.taxAmount || (tot > 0 ? Number((tot - taxableVal).toFixed(2)) : 0));
+  return {
+    ...e,
+    taxableAmount: taxableVal,
+    taxAmount: taxVal,
+    totalAmount: tot,
+    items: e.items || []
+  };
+}
 
 export default Entries;

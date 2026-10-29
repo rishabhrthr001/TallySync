@@ -3,7 +3,8 @@ import axios from 'axios';
 import { 
   Plus, Trash2, Save, Send, Printer, User, CreditCard, Upload, CheckCircle2, 
   ExternalLink, Camera, Lock, Check, Crown, FileText, ShoppingBag, ShoppingCart, 
-  Receipt, Calculator, Sparkles, Percent, Zap, Search, Filter, X, ChevronDown, CheckCheck
+  Receipt, Calculator, Sparkles, Percent, Zap, Search, Filter, X, ChevronDown, CheckCheck,
+  RotateCcw, XCircle, Clock, RefreshCcw
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useNavigate } from 'react-router-dom';
@@ -11,6 +12,7 @@ import { useReactToPrint } from 'react-to-print';
 import PrintableInvoice, { InvoiceData } from '../components/PrintableInvoice';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/format';
+import { formatVoucherStatusMessage } from '../utils/statusFormatter';
 import { useToast } from '../contexts/ToastContext';
 import ProductRecognitionModal from '../components/ProductRecognitionModal';
 import ProUpgradeModal from '../components/ProUpgradeModal';
@@ -70,6 +72,40 @@ const CreateEntry: React.FC = () => {
   const [modalInventoryComboboxOpen, setModalInventoryComboboxOpen] = useState<number | null>(null);
   const [modalInventorySearchTerm, setModalInventorySearchTerm] = useState('');
 
+  // Live Recent Entries & Sync Tracker states
+  const [recentEntries, setRecentEntries] = useState<any[]>([]);
+  const [retryingEntryId, setRetryingEntryId] = useState<string | null>(null);
+
+  const fetchRecentEntries = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get('/api/entries', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (Array.isArray(res.data)) {
+        setRecentEntries(res.data.slice(0, 6));
+      }
+    } catch (err) {
+      console.error('Failed to load recent entries', err);
+    }
+  };
+
+  const handleRetryEntry = async (id: string) => {
+    setRetryingEntryId(id);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`/api/entries/${id}/retry`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      showToast('Entry re-queued for Tally sync!', 'success');
+      setRecentEntries(prev => prev.map(e => e._id === id ? { ...e, status: 'pending', syncError: '' } : e));
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to retry entry', 'error');
+    } finally {
+      setRetryingEntryId(null);
+    }
+  };
+
   const fetchMetadata = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -86,6 +122,12 @@ const CreateEntry: React.FC = () => {
 
   useEffect(() => {
     fetchMetadata();
+    fetchRecentEntries();
+    // Background polling every 3.5s to track Tally sync success / failure / retry in real time
+    const interval = setInterval(() => {
+      fetchRecentEntries();
+    }, 3500);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -462,6 +504,7 @@ const CreateEntry: React.FC = () => {
       setShowSuccess(true);
       showToast('Bill Saved Successfully!', 'success');
       fetchMetadata();
+      fetchRecentEntries();
       // Reset main form
       setPartyName('');
       setPartyGstin('');
@@ -536,6 +579,7 @@ const CreateEntry: React.FC = () => {
       });
       setShowSuccess(true);
       showToast('Bill Saved Successfully!', 'success');
+      fetchRecentEntries();
       // Reset main form
       setPartyName('');
       setPartyGstin('');
@@ -1117,6 +1161,87 @@ const CreateEntry: React.FC = () => {
               value={notes} onChange={(e) => setNotes(e.target.value)}
               className="w-full bg-slate-50 p-4 border border-slate-200 rounded-xl text-sm min-h-[90px] outline-none resize-none placeholder-slate-350 font-medium text-slate-700 focus:border-indigo-400"
             />
+          </div>
+
+          {/* Live Recent Bills & Tally Sync Tracker */}
+          <div className="bg-white rounded-3xl border border-slate-200/60 shadow-sm overflow-hidden p-5 space-y-3.5">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Recent Bills & Live Sync</h4>
+              </div>
+              <button 
+                type="button"
+                onClick={() => navigate('/entries')}
+                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                View All <ExternalLink className="w-3 h-3" />
+              </button>
+            </div>
+
+            {recentEntries.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-4 font-medium">No recent bills created yet</p>
+            ) : (
+              <div className="space-y-2.5">
+                {recentEntries.map((e) => {
+                  const info = formatVoucherStatusMessage(e.status, e.syncError, e.reason);
+                  const isRetrying = retryingEntryId === e._id;
+                  return (
+                    <div key={e._id} className="p-3 bg-slate-50 hover:bg-indigo-50/20 rounded-2xl border border-slate-200/70 transition-all space-y-2">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-black text-slate-850 truncate">{e.partyName}</p>
+                          <p className="text-[10px] font-mono font-bold text-slate-400 mt-0.5">
+                            {e.invoiceNumber} • {e.date}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-black font-mono text-slate-900 block">{formatCurrency(e.totalAmount || 0)}</span>
+                          <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-200/60 text-slate-600">
+                            {e.type}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Status indicator */}
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/50">
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider ${
+                          e.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                          e.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                          'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
+                        }`}>
+                          {e.status === 'success' ? <CheckCircle2 className="w-3 h-3 text-emerald-600 stroke-[2.5]" /> :
+                           e.status === 'failed' ? <XCircle className="w-3 h-3 text-rose-600 stroke-[2.5]" /> :
+                           <Clock className="w-3 h-3 text-amber-600 stroke-[2.5]" />}
+                          {e.status === 'success' ? 'Synced to Tally' : (e.status === 'failed' ? 'Sync Failed' : 'Syncing to Tally...')}
+                        </span>
+
+                        {e.status === 'failed' && (
+                          <button
+                            type="button"
+                            onClick={() => handleRetryEntry(e._id)}
+                            disabled={isRetrying}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                          >
+                            <RotateCcw className={`w-2.5 h-2.5 ${isRetrying ? 'animate-spin' : ''}`} />
+                            {isRetrying ? 'Retrying...' : 'Retry'}
+                          </button>
+                        )}
+                      </div>
+
+                      {e.status === 'failed' && info.headline && (
+                        <p className="text-[9.5px] font-semibold text-rose-600 bg-rose-50 p-1.5 rounded-lg border border-rose-100 leading-tight">
+                          {info.headline}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
